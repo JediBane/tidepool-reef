@@ -274,6 +274,19 @@ const STYLES = `
   .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
   .rb-postgrid .rb-post{margin-bottom:0;}
   .rb-overlay{align-items:center;padding:24px;}
+
+  /* Landscape tablets + desktops: use the horizontal space so the info fits without scrolling. */
+  @media (orientation: landscape) and (min-width: 900px) {
+    .rb-sheet.rb-split{
+      max-width:1040px;width:100%;max-height:90vh;border-radius:22px;
+      display:grid;grid-template-columns:minmax(320px,400px) 1fr;grid-column-gap:26px;align-content:start;
+    }
+    .rb-sheet.rb-split .rb-sheet-h{grid-column:1 / -1;}
+    .rb-split-media{position:sticky;top:0;align-self:start;}
+    .rb-split-body{min-width:0;overflow-y:auto;max-height:calc(90vh - 104px);padding-right:4px;}
+    .rb-split-body::-webkit-scrollbar{width:6px;}
+    .rb-split-body::-webkit-scrollbar-thumb{background:var(--brd-2);border-radius:3px;}
+  }
   .rb-sheet{border-radius:26px;max-height:82vh;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
   .rb-cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
   .rb-cols2 > *{margin-top:0 !important;}
@@ -1502,14 +1515,17 @@ function ZoaSheet({ z, onClose, onAddToTank }) {
   };
   return (
     <div className="rb-overlay" onClick={onClose}>
-      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="rb-sheet rb-split" onClick={(e) => e.stopPropagation()}>
         <div className="rb-sheet-h"><b>{z.name}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
 
-        <div style={{ display: "grid", placeItems: "center", padding: "10px 0 16px", borderRadius: 16,
-          background: `radial-gradient(circle at 50% 45%, ${z.skirt}26, transparent 72%)` }}>
-          <ZoaPolyp z={z} size={190} />
+        <div className="rb-split-media">
+          <div style={{ display: "grid", placeItems: "center", padding: "10px 0 16px", borderRadius: 16,
+            background: `radial-gradient(circle at 50% 45%, ${z.skirt}26, transparent 72%)` }}>
+            <ZoaPolyp z={z} size={190} />
+          </div>
         </div>
 
+        <div className="rb-split-body">
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
           <span className="rb-badge" style={{ background: TIER_COLOR[z.tier] + "22", color: TIER_COLOR[z.tier], border: `1px solid ${TIER_COLOR[z.tier]}55`, fontSize: 11 }}>{z.tier}</span>
           <span className="rb-badge" style={{ background: "rgba(255,255,255,.05)", color: "var(--muted)", border: "1px solid var(--brd)", fontSize: 11 }}>{z.growth} growth</span>
@@ -1549,6 +1565,7 @@ function ZoaSheet({ z, onClose, onAddToTank }) {
           <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={getTips} disabled={busy}>
             <Bot size={16} /> {busy ? "Asking…" : "Care tips"}
           </button>
+        </div>
         </div>
       </div>
     </div>
@@ -1743,12 +1760,16 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
   };
   return (
     <div className="rb-overlay" onClick={onClose}>
-      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="rb-sheet rb-split" onClick={(e) => e.stopPropagation()}>
         <div className="rb-sheet-h">
           <b>{item.name}</b>
           <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
         </div>
-        <SpeciesPhoto item={item} height={190} radius={14} />
+        <div className="rb-split-media">
+          <SpeciesPhoto item={item} height={190} radius={14} />
+          <PhotoCredit item={item} />
+        </div>
+        <div className="rb-split-body">
         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 14px", flexWrap: "wrap" }}>
           <span style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13 }}>{item.sci}</span>
           <span className="rb-badge" style={{ background: CAT_COLOR[item.cat] + "22", color: CAT_COLOR[item.cat], border: `1px solid ${CAT_COLOR[item.cat]}55`, fontSize: 11 }}>
@@ -1822,7 +1843,7 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
             <Bot size={16} /> {busy ? "Asking…" : isPest ? "Eradication plan" : "Care tips"}
           </button>
         </div>
-        <PhotoCredit item={item} />
+        </div>
       </div>
     </div>
   );
@@ -1838,7 +1859,7 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
   const groups = ["Coral", "Fish", "Invert"];
   return (
     <div className="rb-overlay" onClick={onClose}>
-      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+      <div className="rb-sheet rb-split" onClick={(e) => e.stopPropagation()}>
         <div className="rb-sheet-h">
           <b>{t ? t.name : "Loading…"}</b>
           <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
@@ -1846,6 +1867,7 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
         {!data && <div className="rb-empty">Loading tank…</div>}
         {t && (
           <>
+            <div className="rb-split-media">
             <div className="rb-tankhero" style={{ height: 150, marginTop: 0 }}>
               <div className="light" /><div className="rock" />
               <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 14, height: 20, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
@@ -1868,6 +1890,8 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
                 <MessageCircle size={15} /> Message
               </button>
             </div>
+            </div>
+            <div className="rb-split-body">
             {groups.map((g) => {
               const items = data.stock.filter((s) => s.kind === g);
               if (!items.length) return null;
@@ -1892,6 +1916,7 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
             })}
             <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11, marginTop: 14 }}>
               Test results are only shared if the owner opts in.
+            </div>
             </div>
           </>
         )}
