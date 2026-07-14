@@ -303,24 +303,8 @@ const PARAMS = [
 const dayMs = 86400000;
 const fmtDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
-const SEED_LISTINGS = [
-  { id: "s1", cat: "Coral", title: "WYSIWYG Rainbow Zoa Frag (5p)", price: 45, loc: "Melbourne, FL", seller: "frag_fiend", g: ["#ff7a5c", "#b06cff"] },
-  { id: "s2", cat: "Coral", title: "Gold Torch — 2 heads", price: 120, loc: "Orlando, FL", seller: "torch_lord", g: ["#ffc24d", "#ff7a5c"] },
-  { id: "s3", cat: "Equipment", title: "AI Prime 16HD (used)", price: 180, loc: "Palm Bay, FL", seller: "reef_recycle", g: ["#3fe3ff", "#1aa7c4"] },
-  { id: "s4", cat: "Fish", title: "Tank-bred Clownfish pair", price: 60, loc: "Cocoa, FL", seller: "nemo_nursery", g: ["#ff9d8a", "#ffc24d"] },
-  { id: "s5", cat: "Coral", title: "Green Birdsnest colony", price: 35, loc: "Viera, FL", seller: "sps_addict", g: ["#3ce0a3", "#2ee6c8"] },
-  { id: "s6", cat: "Equipment", title: "Jebao DCT-4000 return pump", price: 40, loc: "Titusville, FL", seller: "flowmaster", g: ["#2ee6c8", "#3fe3ff"] },
-  { id: "s7", cat: "Fish", title: "Yellow Watchman Goby", price: 28, loc: "Melbourne, FL", seller: "gobyguy", g: ["#ffc24d", "#3ce0a3"] },
-  { id: "s8", cat: "Coral", title: "Acan Lord — 4 polyp", price: 75, loc: "Rockledge, FL", seller: "acan_acres", g: ["#b06cff", "#ff5d72"] },
-];
 
 
-const SEED_POSTS = [
-  { id: "p1", user: "ReefMatt", handle: "saltlife_matt", tag: "Update", tagc: "#2ee6c8", time: "2h", body: "Two weeks of color-up on this Jason Fox chalice. Dialed alk down to 8.2 and held it rock steady — patience pays.", img: ["#ff7a5c", "#b06cff"], likes: 42, comments: 8 },
-  { id: "p2", user: "Coral Karen", handle: "karens_corals", tag: "Help", tagc: "#ffc24d", time: "5h", body: "Hammer coral started receding on one head overnight. Params all in range. Flow too high? Anyone seen this after a water change?", img: null, likes: 11, comments: 23 },
-  { id: "p3", user: "NanoNate", handle: "nano_nate", tag: "Build", tagc: "#3fe3ff", time: "1d", body: "Fusion 15 update — 8 months in. Running just an HOB skimmer and weekly 2g changes. Less is more on these little tanks.", img: ["#1aa7c4", "#2ee6c8"], likes: 67, comments: 14 },
-  { id: "p4", user: "FragSwap FL", handle: "fragswap_fl", tag: "Event", tagc: "#b06cff", time: "1d", body: "Brevard County frag swap — Saturday 10am at the Melbourne Auditorium. 30+ vendors confirmed. Bring containers!", img: null, likes: 95, comments: 31 },
-];
 
 const QUESTIONS = [
   { id: "q1", user: "Joshua", time: "23h", c: "#b06cff", type: "Fish", img: ["#1aa7c4", "#3fe3ff"], body: "Not a good day for the tank! Lost 2 clowns this morning and now another looking really suspect. Still new to the saltwater life — is this velvet or Ich?? I don't have a QT tank…" },
@@ -416,6 +400,17 @@ async function fetchPublicTank(tankId) {
   }
   return { tank: tank ? { ...tank, owner } : null, stock: stock || [] };
 }
+async function fetchComments(postId) {
+  const [{ data, error }, { data: pf }] = await Promise.all([
+    supabase.from("post_comments").select("*").eq("post_id", postId).order("created_at"),
+    supabase.from("profiles").select("id, handle"),
+  ]);
+  if (error) console.error("[tidepool] comments query failed:", error.message);
+  const people = {};
+  (pf || []).forEach((p) => (people[p.id] = p.handle));
+  return (data || []).map((c) => ({ ...c, handle: people[c.author_id] || "reefer" }));
+}
+
 async function fetchThreads(uid) {
   const [{ data, error }, { data: pf }] = await Promise.all([
     supabase.from("messages").select("*")
@@ -470,12 +465,13 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, allLikes, kr, counts, pf] = await Promise.all([
+  const [children, mr, sr, allLikes, kr, cm, counts, pf] = await Promise.all([
     fetchTankChildren(active.id),
     supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("post_likes").select("post_id"),
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
+    supabase.from("post_comments").select("post_id"),
     fetchSpeciesCounts(),
     supabase.from("profiles").select("id, handle, display_name"),
   ]);
@@ -490,6 +486,8 @@ async function fetchAll(uid) {
   (kr.data || []).forEach((r) => (liked[r.post_id] = true));
   const likeCounts = {};
   (allLikes.data || []).forEach((r) => (likeCounts[r.post_id] = (likeCounts[r.post_id] || 0) + 1));
+  const commentCounts = {};
+  (cm.data || []).forEach((r) => (commentCounts[r.post_id] = (commentCounts[r.post_id] || 0) + 1));
   return {
     uid,
     profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
@@ -508,8 +506,8 @@ async function fetchAll(uid) {
       return {
         id: r.id, user: (a && (a.display_name || a.handle)) || "reefer",
         handle: (a && a.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
-        time: rel(r.created_at), body: r.body, img: null,
-        likes: likeCounts[r.id] || 0, comments: 0, mine: r.author_id === uid,
+        time: rel(r.created_at), body: r.body, img: r.img ? r.img.split(",") : null,
+        likes: likeCounts[r.id] || 0, comments: commentCounts[r.id] || 0, mine: r.author_id === uid,
       };
     }),
     liked,
@@ -660,8 +658,8 @@ export default function TidepoolReef() {
       <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
   }
 
-  const allListings = [...state.listings, ...SEED_LISTINGS];
-  const allPosts = [...state.posts, ...SEED_POSTS];
+  const allListings = state.listings;
+  const allPosts = state.posts;
   const issues = latest ? PARAMS.filter((p) => statusOf(p, latest[p.key]) !== "good") : [];
   const corals = state.livestock.filter((l) => l.type === "Coral").length;
   const fish = state.livestock.filter((l) => l.type === "Fish").length;
@@ -736,10 +734,30 @@ export default function TidepoolReef() {
   };
   const toggleLike = async (id) => {
     const had = !!state.liked[id];
-    setState((s) => ({ ...s, liked: { ...s.liked, [id]: !had } }));
-    if (String(id).startsWith("p") || String(id).startsWith("tmp")) return; // seed/optimistic posts aren't in DB
-    if (had) await supabase.from("post_likes").delete().eq("post_id", id).eq("profile_id", state.uid);
-    else await supabase.from("post_likes").insert({ post_id: id, profile_id: state.uid });
+    setState((s) => ({
+      ...s,
+      liked: { ...s.liked, [id]: !had },
+      posts: s.posts.map((p) => (p.id === id ? { ...p, likes: Math.max(0, p.likes + (had ? -1 : 1)) } : p)),
+    }));
+    const { error } = had
+      ? await supabase.from("post_likes").delete().eq("post_id", id).eq("profile_id", state.uid)
+      : await supabase.from("post_likes").insert({ post_id: id, profile_id: state.uid });
+    if (error) {   // roll back so the UI never lies about what was saved
+      console.error("[tidepool] like failed:", error.message);
+      setState((s) => ({
+        ...s,
+        liked: { ...s.liked, [id]: had },
+        posts: s.posts.map((p) => (p.id === id ? { ...p, likes: Math.max(0, p.likes + (had ? 1 : -1)) } : p)),
+      }));
+    }
+  };
+  const addComment = async (postId, body) => {
+    const { data, error } = await supabase.from("post_comments")
+      .insert({ post_id: postId, author_id: state.uid, body }).select().single();
+    if (error) { console.error("[tidepool] comment failed:", error.message); return null; }
+    setState((s) => ({ ...s, posts: s.posts.map((p) => (p.id === postId ? { ...p, comments: p.comments + 1 } : p)) }));
+    award(2);
+    return { ...data, handle: state.profile.handle };
   };
   const switchTank = async (id) => {
     if (id === state.tankId) return;
@@ -774,7 +792,7 @@ export default function TidepoolReef() {
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
-        {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
+        {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
@@ -1066,65 +1084,137 @@ function Profile({ state, fish, corals, issues, go }) {
 }
 
 /* ---------------- Feed ---------------- */
-function Feed({ allPosts, liked, toggleLike, addPost }) {
+function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
   const [draft, setDraft] = useState("");
+  const [tag, setTag] = useState("Update");
+  const [open, setOpen] = useState(null);
+  const TAGS = ["Update", "Help", "Build", "Event"];
   return (
     <div className="rb-fadein">
       <div className="rb-sec" style={{ marginTop: 6 }}><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
-      <div className="rb-card rb-compose">
-        <CoralAvatar size={40} />
-        <div style={{ flex: 1 }}>
-          <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…" value={draft} onChange={(e) => setDraft(e.target.value)} />
-          <div style={{ textAlign: "right", marginTop: 8 }}>
-            <button className="rb-btn" disabled={!draft.trim()} onClick={() => { addPost(draft.trim()); setDraft(""); }}><Send size={15} /> Post</button>
-          </div>
+      <div className="rb-card rb-compose" style={{ flexDirection: "column", gap: 0 }}>
+        <div style={{ display: "flex", gap: 10, width: "100%" }}>
+          <CoralAvatar size={40} />
+          <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…"
+            value={draft} onChange={(e) => setDraft(e.target.value)} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, width: "100%", flexWrap: "wrap" }}>
+          {TAGS.map((t) => (
+            <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>{t}</div>
+          ))}
+          <button className="rb-btn" style={{ marginLeft: "auto" }} disabled={!draft.trim()}
+            onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
+            <Send size={15} /> Post
+          </button>
         </div>
       </div>
+
+      {allPosts.length === 0 && (
+        <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
+          Nothing here yet — post the first update.
+        </div>
+      )}
+
       <div className="rb-postgrid">
-      {allPosts.map((post) => {
-        const isLiked = liked[post.id];
-        return (
-          <div key={post.id} className="rb-card rb-post">
-            <div className="rb-phead">
-              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${post.tagc},var(--violet))` }}>{post.user[0]}</div>
-              <div><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
-              <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
+        {allPosts.map((post) => {
+          const isLiked = liked[post.id];
+          return (
+            <div key={post.id} className="rb-card rb-post" style={{ cursor: "pointer" }} onClick={() => setOpen(post)}>
+              <div className="rb-phead">
+                <div className="rb-pa" style={{ background: `linear-gradient(140deg,${post.tagc},var(--violet))` }}>{post.user[0]}</div>
+                <div><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
+                <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
+              </div>
+              <div className="rb-pbody">{post.body}</div>
+              {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
+              <div className="rb-pacts">
+                <span className={isLiked ? "liked" : ""} onClick={(e) => { e.stopPropagation(); toggleLike(post.id); }}>
+                  <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
+                </span>
+                <span onClick={(e) => { e.stopPropagation(); setOpen(post); }}>
+                  <MessageCircle size={16} /> {post.comments}
+                </span>
+              </div>
             </div>
-            <div className="rb-pbody">{post.body}</div>
-            {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
-            <div className="rb-pacts">
-              <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}><Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes + (isLiked ? 1 : 0)}</span>
-              <span><MessageCircle size={16} /> {post.comments}</span>
-            </div>
-          </div>
-        );
-      })}
-      </div>
-      <div className="rb-sec"><h3>Community Questions</h3><p>Share your knowledge and help fellow reefers</p></div>
-      <div className="rb-hscroll">
-        {QUESTIONS.map((qq) => (
-          <div key={qq.id} className="rb-card rb-qcard">
-            <div className="rb-phead">
-              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${qq.c},var(--violet))` }}>{qq.user[0]}</div>
-              <div><div className="u">{qq.user}</div></div>
-              <span className="meta" style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>{qq.time}</span>
-            </div>
-            <div className="rb-pbody rb-clamp">{qq.body}</div>
-            <div className="rb-qimg" style={{ background: `linear-gradient(140deg,${qq.img[0]},${qq.img[1]})` }}>
-              {qq.type === "Fish" ? <Fish size={30} /> : qq.type === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      <div className="rb-sec"><h3>Recent Parameters</h3><p>Latest updates from the community</p></div>
-      <div className="rb-hscroll">
-        {COMMUNITY_TANKS.map((t) => (
-          <div key={t.id} className="rb-card rb-tcard">
-            <div className="rb-tcard-h"><b>{t.name}</b><span>{t.time}</span></div>
-            <div className="rb-timg" style={{ background: `linear-gradient(140deg,${t.g[0]},${t.g[1]})` }}><Waves size={30} /></div>
-          </div>
-        ))}
+      {open && (
+        <PostSheet post={allPosts.find((p) => p.id === open.id) || open} liked={liked} toggleLike={toggleLike}
+          addComment={addComment} uid={uid} onClose={() => setOpen(null)} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Post detail + comments ---------------- */
+function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
+  const [comments, setComments] = useState(null);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isLiked = liked[post.id];
+
+  useEffect(() => { let alive = true; fetchComments(post.id).then((c) => { if (alive) setComments(c); }); return () => { alive = false; }; }, [post.id]);
+
+  const send = async () => {
+    const body = draft.trim(); if (!body) return;
+    setBusy(true); setDraft("");
+    const c = await addComment(post.id, body);
+    if (c) setComments((cs) => [...(cs || []), c]);
+    setBusy(false);
+  };
+
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b>Post</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+
+        <div className="rb-phead">
+          <div className="rb-pa" style={{ background: `linear-gradient(140deg,${post.tagc},var(--violet))` }}>{post.user[0]}</div>
+          <div><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
+          <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
+        </div>
+        <div className="rb-pbody">{post.body}</div>
+        {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
+        <div className="rb-pacts" style={{ marginBottom: 16 }}>
+          <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
+            <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
+          </span>
+          <span><MessageCircle size={16} /> {post.comments}</span>
+        </div>
+
+        <div className="rb-h2" style={{ marginTop: 0, marginBottom: 10 }}>
+          <MessageCircle size={15} color="var(--aqua)" /> Comments
+          <small>{comments === null ? "…" : comments.length}</small>
+        </div>
+        <div className="rb-card" style={{ marginBottom: 14 }}>
+          {comments === null && <div className="rb-empty" style={{ padding: 18 }}>Loading…</div>}
+          {comments !== null && comments.length === 0 && (
+            <div className="rb-empty" style={{ padding: 20 }}>No comments yet — be the first to weigh in.</div>
+          )}
+          {(comments || []).map((c) => (
+            <div key={c.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+              <div className="rb-pa" style={{ background: "linear-gradient(140deg,var(--aqua),var(--violet))", width: 34, height: 34, fontSize: 13 }}>
+                {(c.handle || "?")[0].toUpperCase()}
+              </div>
+              <div style={{ flex: 1 }}>
+                <div className="nm" style={{ fontSize: 13 }}>@{c.handle} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 11.5 }}>· {rel(c.created_at)}</span></div>
+                <div className="sub" style={{ lineHeight: 1.5, color: "#d8eef5" }}>{c.body}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="rb-ai-row">
+          <input className="rb-input" placeholder="Add a comment…" value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !busy) send(); }} />
+          <button className="rb-btn" disabled={!draft.trim() || busy} onClick={send}><Send size={16} /></button>
+        </div>
       </div>
     </div>
   );
