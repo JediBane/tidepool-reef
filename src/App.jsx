@@ -925,33 +925,6 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
         <div className="rb-iconbtn sm"><SlidersHorizontal size={17} /></div>
       </div>
 
-      <div className="rb-sec"><h3>Community Questions</h3><p>Share your knowledge and help fellow reefers</p></div>
-      <div className="rb-hscroll">
-        {QUESTIONS.map((qq) => (
-          <div key={qq.id} className="rb-card rb-qcard">
-            <div className="rb-phead">
-              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${qq.c},var(--violet))` }}>{qq.user[0]}</div>
-              <div><div className="u">{qq.user}</div></div>
-              <span className="meta" style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>{qq.time}</span>
-            </div>
-            <div className="rb-pbody rb-clamp">{qq.body}</div>
-            <div className="rb-qimg" style={{ background: `linear-gradient(140deg,${qq.img[0]},${qq.img[1]})` }}>
-              {qq.type === "Fish" ? <Fish size={30} /> : qq.type === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="rb-sec"><h3>Recent Parameters</h3><p>Latest updates from the community</p></div>
-      <div className="rb-hscroll">
-        {COMMUNITY_TANKS.map((t) => (
-          <div key={t.id} className="rb-card rb-tcard">
-            <div className="rb-tcard-h"><b>{t.name}</b><span>{t.time}</span></div>
-            <div className="rb-timg" style={{ background: `linear-gradient(140deg,${t.g[0]},${t.g[1]})` }}><Waves size={30} /></div>
-          </div>
-        ))}
-      </div>
-
       <div className="rb-sec"><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
       <div className="rb-card rb-compose">
         <CoralAvatar size={40} />
@@ -981,6 +954,32 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
           </div>
         );
       })}
+      </div>
+      <div className="rb-sec"><h3>Community Questions</h3><p>Share your knowledge and help fellow reefers</p></div>
+      <div className="rb-hscroll">
+        {QUESTIONS.map((qq) => (
+          <div key={qq.id} className="rb-card rb-qcard">
+            <div className="rb-phead">
+              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${qq.c},var(--violet))` }}>{qq.user[0]}</div>
+              <div><div className="u">{qq.user}</div></div>
+              <span className="meta" style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>{qq.time}</span>
+            </div>
+            <div className="rb-pbody rb-clamp">{qq.body}</div>
+            <div className="rb-qimg" style={{ background: `linear-gradient(140deg,${qq.img[0]},${qq.img[1]})` }}>
+              {qq.type === "Fish" ? <Fish size={30} /> : qq.type === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-sec"><h3>Recent Parameters</h3><p>Latest updates from the community</p></div>
+      <div className="rb-hscroll">
+        {COMMUNITY_TANKS.map((t) => (
+          <div key={t.id} className="rb-card rb-tcard">
+            <div className="rb-tcard-h"><b>{t.name}</b><span>{t.time}</span></div>
+            <div className="rb-timg" style={{ background: `linear-gradient(140deg,${t.g[0]},${t.g[1]})` }}><Waves size={30} /></div>
+          </div>
+        ))}
       </div>
     </div>
   );
