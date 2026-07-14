@@ -1119,17 +1119,28 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
           <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…"
             value={draft} onChange={(e) => setDraft(e.target.value)} />
           <div className="rb-compose-bar">
-            {draft.trim() && TAGS.map((t) => (
-              <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>{t}</div>
+            {TAGS.map((t) => (
+              <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>
+                {t === "Help" ? "❓ Help" : t}
+              </div>
             ))}
             <button className="rb-btn" disabled={!draft.trim()}
               onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
               <Send size={15} /> Post
             </button>
           </div>
+          {tag === "Help" && (
+            <div style={{ fontSize: 11.5, color: "var(--aqua)", marginTop: 8, display: "flex", alignItems: "center", gap: 5 }}>
+              <Users size={12} /> Tagged Help — this posts to Community Questions so other reefers can answer.
+            </div>
+          )}
         </div>
       </div>
 
+      <CommunityQuestions posts={allPosts} onOpen={setOpen} />
+      <RecentParameters onOpenTank={setTankView} />
+
+      <div className="rb-sec"><h3>Latest Posts</h3><p>Everything from the community</p></div>
       {allPosts.length === 0 && (
         <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
           Nothing here yet — post the first update.
@@ -1161,8 +1172,6 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
         })}
       </div>
 
-      <CommunityQuestions posts={allPosts} onOpen={setOpen} />
-      <RecentParameters onOpenTank={setTankView} />
     </div>
 
       {open && (
