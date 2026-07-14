@@ -1,0 +1,1309 @@
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import {
+  LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea, CartesianGrid,
+} from "recharts";
+import {
+  Menu, X, Bell, Waves, Droplets, Fish, Shell, Store, Newspaper, BookOpen, ListChecks,
+  FlaskConical, Notebook, Camera, Bot, MessageCircle, Receipt, Settings, MapPin, Heart,
+  ChevronRight, ChevronLeft, Check, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
+  Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, SlidersHorizontal,
+} from "lucide-react";
+import { createClient } from "@supabase/supabase-js";
+
+/* ======================================================================= */
+/*  Styles — "Actinic": a reef tank at night under blue LED                 */
+/* ======================================================================= */
+const STYLES = `
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap');
+:root{
+  --bg-0:#03080c;--bg-1:#05121b;--bg-2:#0b2330;
+  --glass:rgba(13,40,55,.55);--glass-2:rgba(9,30,42,.78);
+  --brd:rgba(86,224,255,.16);--brd-2:rgba(86,224,255,.32);
+  --aqua:#3fe3ff;--aqua-d:#1aa7c4;--teal:#2ee6c8;--coral:#ff7a5c;--violet:#b06cff;--gold:#ffc24d;
+  --good:#3ce0a3;--warn:#ffc24d;--bad:#ff5d72;
+  --text:#e9f7fc;--muted:#84a8ba;--muted-2:#5b8194;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+.rb-root{font-family:'Hanken Grotesk',sans-serif;color:var(--text);min-height:100vh;position:relative;overflow-x:hidden;
+  background:radial-gradient(120% 80% at 50% -10%,rgba(63,227,255,.18),transparent 55%),
+    radial-gradient(90% 60% at 90% 110%,rgba(176,108,255,.12),transparent 60%),
+    radial-gradient(70% 50% at 0% 100%,rgba(255,122,92,.08),transparent 55%),
+    linear-gradient(180deg,var(--bg-1),var(--bg-0) 70%);}
+.rb-root:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;mix-blend-mode:overlay;z-index:0;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");}
+.rb-shell{max-width:480px;margin:0 auto;position:relative;z-index:1;padding:0 16px 120px;}
+.rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) both;}
+@keyframes rbUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
+.rb-top{display:flex;align-items:center;gap:12px;padding:18px 2px 14px;position:sticky;top:0;z-index:30;}
+.rb-iconbtn{width:42px;height:42px;border-radius:14px;border:1px solid var(--brd);background:var(--glass);
+  display:grid;place-items:center;color:var(--text);cursor:pointer;position:relative;backdrop-filter:blur(12px);flex:none;}
+.rb-title{font-family:'Bricolage Grotesque';font-weight:800;font-size:19px;letter-spacing:-.4px;}
+.rb-cnt{position:absolute;top:-4px;right:-4px;background:var(--bad);color:#fff;font-size:10px;font-weight:700;
+  min-width:18px;height:18px;border-radius:9px;display:grid;place-items:center;padding:0 4px;}
+.rb-pearls{margin-left:auto;display:flex;align-items:center;gap:6px;font-weight:700;font-size:13px;
+  background:rgba(176,108,255,.14);border:1px solid rgba(176,108,255,.4);color:#d7b6ff;padding:7px 12px;border-radius:20px;}
+.rb-pearl{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#b06cff 70%);box-shadow:0 0 7px #b06cff;}
+
+.rb-card{background:var(--glass);border:1px solid var(--brd);border-radius:20px;backdrop-filter:blur(14px);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 14px 40px -24px rgba(0,0,0,.8);}
+.rb-h2{font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;letter-spacing:-.3px;margin:24px 2px 12px;
+  display:flex;align-items:center;gap:8px;}
+.rb-h2 small{font-family:'Hanken Grotesk';font-weight:500;font-size:12px;color:var(--muted);margin-left:auto;}
+
+/* drawer */
+.rb-scrim{position:fixed;inset:0;z-index:50;background:rgba(2,9,15,.55);backdrop-filter:blur(2px);animation:rbFade .2s both;}
+@keyframes rbFade{from{opacity:0}to{opacity:1}}
+.rb-drawer{position:fixed;top:0;right:0;height:100%;width:min(330px,82%);z-index:51;padding:22px 18px;overflow-y:auto;
+  background:linear-gradient(200deg,#0c2536,#06141d);border-left:1px solid var(--brd);
+  animation:rbDraw .28s cubic-bezier(.2,.8,.2,1) both;box-shadow:-30px 0 60px -20px #000;}
+@keyframes rbDraw{from{transform:translateX(40px);opacity:.3}to{transform:none;opacity:1}}
+.rb-dhead{display:flex;flex-direction:column;align-items:center;text-align:center;padding:6px 0 18px;cursor:pointer;}
+.rb-av{border-radius:50%;display:grid;place-items:center;overflow:hidden;flex:none;}
+.rb-av.ring{box-shadow:0 0 0 3px var(--gold),0 0 0 6px rgba(255,194,77,.25);background:#0a1a25;}
+.rb-dhead .h{font-family:'Bricolage Grotesque';font-weight:800;font-size:19px;margin-top:12px;}
+.rb-dloc{color:var(--muted);font-size:13px;margin-top:8px;display:flex;align-items:center;gap:4px;}
+.rb-mitem{display:flex;align-items:center;gap:14px;padding:14px 8px;border-radius:13px;cursor:pointer;font-size:15px;font-weight:600;}
+.rb-mitem:active{background:rgba(255,255,255,.05);}
+.rb-mitem .ic{color:var(--aqua);display:grid;place-items:center;width:24px;}
+.rb-mitem .badge{margin-left:auto;background:var(--bad);color:#fff;font-size:11px;font-weight:700;border-radius:11px;padding:2px 8px;}
+.rb-mitem .reldot{margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--aqua);box-shadow:0 0 7px var(--aqua);}
+.rb-mdiv{height:1px;background:rgba(255,255,255,.07);margin:6px 2px;}
+
+/* profile */
+.rb-phero{padding:22px 20px;text-align:center;position:relative;overflow:hidden;}
+.rb-phero .glow{position:absolute;inset:0;opacity:.5;background:radial-gradient(60% 80% at 50% -10%,rgba(176,108,255,.4),transparent 60%);}
+.rb-phero .h{font-family:'Bricolage Grotesque';font-weight:800;font-size:24px;margin-top:12px;position:relative;}
+.rb-phero .ha{color:var(--muted);font-size:14px;position:relative;}
+.rb-badges{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px;position:relative;}
+.rb-badge{font-size:12px;font-weight:700;padding:6px 13px;border-radius:20px;display:flex;align-items:center;gap:5px;}
+.rb-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px;}
+.rb-stat{background:rgba(255,255,255,.03);border:1px solid var(--brd);border-radius:14px;padding:13px;text-align:center;}
+.rb-stat .v{font-family:'Bricolage Grotesque';font-weight:800;font-size:24px;}
+.rb-stat .k{font-size:11px;color:var(--muted);margin-top:2px;}
+.rb-tankhero{height:230px;border-radius:18px;overflow:hidden;position:relative;margin-top:12px;
+  background:linear-gradient(180deg,#0a2742,#04111a);border:1px solid var(--brd);}
+.rb-tankhero .light{position:absolute;inset:0;background:
+  radial-gradient(50% 70% at 30% 120%,rgba(46,230,200,.45),transparent 55%),
+  radial-gradient(45% 65% at 75% 130%,rgba(176,108,255,.4),transparent 55%),
+  radial-gradient(80% 50% at 50% -10%,rgba(63,160,255,.35),transparent 60%);}
+.rb-tankhero .rock{position:absolute;bottom:0;left:8%;right:8%;height:46%;border-radius:50% 50% 0 0;
+  background:linear-gradient(180deg,#173a52,#0a2030);filter:blur(.3px);}
+.rb-tankhero .acts{position:absolute;top:12px;right:12px;display:flex;gap:8px;}
+.rb-tankhero .acts div{width:40px;height:40px;border-radius:50%;background:rgba(4,17,26,.55);border:1px solid var(--brd);
+  display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(8px);}
+.rb-coralbit{position:absolute;border-radius:6px;}
+
+/* param grid */
+.rb-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.rb-pcard{padding:13px 14px;cursor:pointer;transition:transform .15s,border-color .15s;}
+.rb-pcard:active{transform:scale(.97);}
+.rb-pcard.sel{border-color:var(--brd-2);box-shadow:0 0 0 1px var(--brd-2),0 0 24px -8px var(--aqua);}
+.rb-pcard .top{display:flex;align-items:center;justify-content:space-between;}
+.rb-pcard .lbl{font-size:12px;color:var(--muted);}
+.rb-pcard .val{font-family:'Bricolage Grotesque';font-weight:700;font-size:22px;margin-top:6px;}
+.rb-pcard .val u{font-size:12px;color:var(--muted);font-weight:500;text-decoration:none;margin-left:3px;}
+.rb-sdot{width:9px;height:9px;border-radius:50%;}
+.s-good{background:var(--good);box-shadow:0 0 9px var(--good);}
+.s-warn{background:var(--warn);box-shadow:0 0 9px var(--warn);}
+.s-bad{background:var(--bad);box-shadow:0 0 9px var(--bad);}
+.rb-trend{font-size:11px;margin-top:4px;color:var(--muted);}
+.rb-chartwrap{padding:16px 6px 8px 0;margin-top:10px;}
+.rb-chart-h{display:flex;align-items:center;justify-content:space-between;padding:0 14px 6px;}
+.rb-chart-h b{font-family:'Bricolage Grotesque';font-size:15px;}
+
+/* lists */
+.rb-li{display:flex;align-items:center;gap:13px;padding:13px 14px;border-bottom:1px solid rgba(255,255,255,.05);}
+.rb-li:last-child{border-bottom:none;}
+.rb-thumb{width:46px;height:46px;border-radius:13px;flex:none;display:grid;place-items:center;color:#04111a;}
+.rb-li .nm{font-weight:600;font-size:14px;}
+.rb-li .sub{font-size:12px;color:var(--muted);margin-top:1px;}
+
+/* tasks */
+.rb-task{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;}
+.rb-task:last-child{border-bottom:none;}
+.rb-check{width:24px;height:24px;border-radius:8px;border:2px solid var(--brd-2);flex:none;display:grid;place-items:center;color:var(--bg-0);transition:.15s;}
+.rb-task .nm{font-weight:600;font-size:14px;}
+.rb-task .when{font-size:12px;margin-top:1px;}
+.due-over{color:var(--bad)}.due-soon{color:var(--warn)}.due-ok{color:var(--muted)}
+.rb-pill{margin-left:auto;font-size:10.5px;color:var(--muted);border:1px solid var(--brd);border-radius:20px;padding:3px 9px;}
+
+/* chips */
+.rb-tabs{display:flex;gap:8px;margin:4px 0 14px;overflow-x:auto;padding-bottom:2px;}
+.rb-chip{flex:none;font-size:13px;padding:8px 15px;border-radius:20px;border:1px solid var(--brd);background:var(--glass);
+  color:var(--muted);cursor:pointer;font-weight:600;}
+.rb-chip.on{color:var(--bg-0);background:linear-gradient(120deg,var(--aqua),var(--teal));border-color:transparent;}
+
+/* market + library grids */
+.rb-mgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.rb-mcard{overflow:hidden;cursor:pointer;transition:transform .15s;}
+.rb-mcard:active{transform:scale(.98);}
+.rb-mimg{height:120px;display:grid;place-items:center;position:relative;color:rgba(255,255,255,.85);}
+.rb-mimg .cat{position:absolute;top:8px;left:8px;font-size:10px;background:rgba(4,17,26,.6);padding:3px 8px;border-radius:20px;
+  backdrop-filter:blur(6px);border:1px solid var(--brd);}
+.rb-mbody{padding:11px 12px;}
+.rb-mbody .t{font-weight:600;font-size:13.5px;line-height:1.25;}
+.rb-mbody .p{font-family:'Bricolage Grotesque';font-weight:800;font-size:17px;margin-top:6px;color:var(--aqua);}
+.rb-mbody .sci{font-size:11px;color:var(--muted);margin-top:4px;font-style:italic;}
+.rb-mbody .loc{font-size:11px;color:var(--muted);margin-top:3px;display:flex;align-items:center;gap:3px;}
+.rb-care{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+.rb-care span{font-size:10px;border:1px solid var(--brd);border-radius:8px;padding:2px 7px;color:var(--muted);}
+
+/* community */
+.rb-post{padding:16px;margin-bottom:14px;}
+.rb-phead{display:flex;align-items:center;gap:11px;margin-bottom:12px;}
+.rb-pa{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:var(--bg-0);font-size:15px;flex:none;}
+.rb-phead .u{font-weight:700;font-size:14px}.rb-phead .meta{font-size:11.5px;color:var(--muted)}
+.rb-ptag{margin-left:auto;font-size:10.5px;padding:4px 10px;border-radius:20px;font-weight:600;}
+.rb-pbody{font-size:14px;line-height:1.5;color:#d8eef5;}
+.rb-pimg{height:170px;border-radius:14px;margin:12px 0;display:grid;place-items:center;color:rgba(4,17,26,.5);}
+.rb-pacts{display:flex;gap:20px;margin-top:6px;color:var(--muted);font-size:13px;}
+.rb-pacts span{display:flex;align-items:center;gap:6px;cursor:pointer;}
+.rb-pacts .liked{color:var(--coral);}
+.rb-compose{padding:14px;display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;}
+
+/* inputs */
+.rb-input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:12px;color:var(--text);
+  font-family:inherit;font-size:14px;padding:11px 13px;resize:none;outline:none;}
+.rb-input:focus{border-color:var(--brd-2);}
+.rb-btn{border:none;border-radius:12px;padding:11px 16px;font-family:'Hanken Grotesk';font-weight:700;font-size:14px;
+  background:linear-gradient(120deg,var(--aqua),var(--teal));color:var(--bg-0);cursor:pointer;display:inline-flex;
+  align-items:center;gap:7px;justify-content:center;}
+.rb-btn:disabled{opacity:.5}
+.rb-btn.ghost{background:transparent;border:1px solid var(--brd-2);color:var(--text);}
+.rb-btn.violet{background:linear-gradient(120deg,var(--violet),var(--aqua-d));color:#fff;}
+
+/* bottom nav */
+.rb-nav{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 28px));z-index:40;
+  display:flex;justify-content:space-around;padding:9px;border-radius:24px;background:var(--glass-2);border:1px solid var(--brd);
+  backdrop-filter:blur(20px);box-shadow:0 18px 50px -16px rgba(0,0,0,.85);}
+.rb-navi{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0;border-radius:16px;
+  color:var(--muted-2);cursor:pointer;font-size:10.5px;font-weight:600;transition:.18s;}
+.rb-navi.on{color:var(--bg-0);background:linear-gradient(140deg,var(--aqua),var(--teal));box-shadow:0 0 22px -4px var(--aqua);}
+.rb-fab{position:fixed;bottom:92px;right:max(16px,calc(50% - 224px));width:56px;height:56px;border-radius:18px;z-index:41;
+  background:linear-gradient(140deg,var(--coral),var(--violet));border:none;color:#fff;display:grid;place-items:center;cursor:pointer;
+  box-shadow:0 14px 34px -8px rgba(255,122,92,.6);}
+
+/* sheet */
+.rb-overlay{position:fixed;inset:0;z-index:60;background:rgba(2,10,16,.66);backdrop-filter:blur(4px);
+  display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;}
+.rb-sheet{width:min(480px,100%);max-height:88vh;overflow-y:auto;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+  border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px;animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
+@keyframes rbSheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+.rb-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.rb-sheet-h b{font-family:'Bricolage Grotesque';font-size:19px;}
+.rb-field{margin-bottom:13px}.rb-field label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px;}
+.rb-num{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);border:1px solid var(--brd);
+  border-radius:12px;padding:9px 13px;margin-bottom:8px;}
+.rb-num label{font-size:13px}.rb-num input{width:84px;background:transparent;border:none;color:var(--aqua);text-align:right;
+  font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;outline:none;}
+
+/* AI */
+.rb-ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
+.rb-ai-msg{padding:11px 14px;border-radius:15px;font-size:13.5px;line-height:1.5;max-width:88%;white-space:pre-wrap;}
+.rb-ai-msg.u{align-self:flex-end;background:linear-gradient(120deg,var(--aqua-d),var(--aqua));color:var(--bg-0);font-weight:500;}
+.rb-ai-msg.a{align-self:flex-start;background:rgba(255,255,255,.05);border:1px solid var(--brd);}
+.rb-ai-row{display:flex;gap:9px;position:sticky;bottom:0;}
+.rb-typing{display:flex;gap:5px;padding:4px 0}.rb-typing i{width:7px;height:7px;border-radius:50%;background:var(--aqua);animation:rbBlink 1.2s infinite}
+.rb-typing i:nth-child(2){animation-delay:.2s}.rb-typing i:nth-child(3){animation-delay:.4s}
+@keyframes rbBlink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+.rb-empty{text-align:center;color:var(--muted);font-size:13px;padding:30px 10px;}
+
+/* reef id */
+.rb-drop{border:1.5px dashed var(--brd-2);border-radius:18px;padding:34px 18px;text-align:center;cursor:pointer;color:var(--muted);}
+.rb-preview{width:100%;border-radius:16px;max-height:300px;object-fit:cover;margin-bottom:14px;border:1px solid var(--brd);}
+
+/* pearl toast */
+.rb-toast{position:fixed;top:74px;left:50%;transform:translateX(-50%);z-index:80;background:rgba(176,108,255,.92);
+  color:#fff;font-weight:700;font-size:14px;padding:10px 18px;border-radius:22px;display:flex;align-items:center;gap:8px;
+  box-shadow:0 12px 30px -8px rgba(176,108,255,.7);animation:rbToast 2s both;}
+@keyframes rbToast{0%{opacity:0;transform:translate(-50%,-12px)}15%,80%{opacity:1;transform:translate(-50%,0)}100%{opacity:0;transform:translate(-50%,-12px)}}
+
+/* logo + top bar */
+.rb-logowrap{flex:1;display:flex;justify-content:center;}
+.rb-logo{font-family:'Bricolage Grotesque';font-weight:800;font-size:19px;letter-spacing:-.6px;line-height:1;position:relative;padding-bottom:4px;}
+.rb-logo .a{color:#3f9bff}.rb-logo .b{color:var(--teal)}
+.rb-wave{position:absolute;left:0;width:62%;bottom:-2px;height:6px;}
+.rb-avbtn{position:relative;cursor:pointer;flex:none;}
+.rb-avdot{position:absolute;top:0;right:0;width:11px;height:11px;border-radius:50%;background:var(--bad);border:2px solid var(--bg-0);}
+.rb-navbadge{position:absolute;top:-7px;right:-10px;background:var(--bad);color:#fff;font-size:9px;font-weight:700;min-width:15px;height:15px;
+  border-radius:8px;display:grid;place-items:center;padding:0 3px;}
+
+/* feed search + sections */
+.rb-searchrow{display:flex;align-items:center;gap:10px;margin:2px 0 6px;}
+.rb-iconbtn.sm{width:38px;height:38px;border-radius:50%;}
+.rb-searchpill{flex:1;display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:24px;padding:10px 16px;}
+.rb-searchpill input{flex:1;background:transparent;border:none;color:var(--text);outline:none;font-family:inherit;font-size:14px;}
+.rb-sec{margin:22px 2px 12px;}
+.rb-sec h3{font-family:'Bricolage Grotesque';font-weight:800;font-size:21px;letter-spacing:-.5px;margin:0;}
+.rb-sec p{color:var(--muted);font-size:13px;margin:3px 0 0;}
+.rb-hscroll{display:flex;gap:12px;overflow-x:auto;padding:0 16px 6px;margin:0 -16px;scroll-snap-type:x mandatory;}
+.rb-hscroll::-webkit-scrollbar{display:none;}
+.rb-qcard{flex:none;width:268px;padding:14px;scroll-snap-align:start;}
+.rb-clamp{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;}
+.rb-qimg{height:118px;border-radius:12px;margin-top:12px;display:grid;place-items:center;color:rgba(4,17,26,.45);}
+.rb-tcard{flex:none;width:196px;padding:0;overflow:hidden;scroll-snap-align:start;}
+.rb-tcard-h{display:flex;align-items:center;justify-content:space-between;padding:12px 14px 10px;}
+.rb-tcard-h b{font-family:'Bricolage Grotesque';font-size:16px;}
+.rb-tcard-h span{font-size:12px;color:var(--muted);}
+.rb-timg{height:118px;display:grid;place-items:center;color:rgba(4,17,26,.45);}
+`;
+
+/* ======================================================================= */
+/*  Data                                                                    */
+/* ======================================================================= */
+const PARAMS = [
+  { key: "alk",  label: "Alkalinity", unit: "dKH", min: 7.5, max: 9.5, ideal: [8, 9],       dec: 1 },
+  { key: "cal",  label: "Calcium",    unit: "ppm", min: 380, max: 470, ideal: [420, 440],   dec: 0 },
+  { key: "mag",  label: "Magnesium",  unit: "ppm", min: 1250,max: 1450,ideal: [1300, 1400], dec: 0 },
+  { key: "no3",  label: "Nitrate",    unit: "ppm", min: 0,   max: 30,  ideal: [5, 10],      dec: 1 },
+  { key: "po4",  label: "Phosphate",  unit: "ppm", min: 0,   max: 0.25,ideal: [0.03, 0.1],  dec: 2 },
+  { key: "ph",   label: "pH",         unit: "",    min: 7.7, max: 8.5, ideal: [8.0, 8.4],   dec: 2 },
+  { key: "sal",  label: "Salinity",   unit: "sg",  min: 1.02,max: 1.028,ideal:[1.024,1.026],dec: 3 },
+  { key: "temp", label: "Temp",       unit: "°F",  min: 74,  max: 82,  ideal: [76, 78],     dec: 1 },
+];
+const dayMs = 86400000;
+const fmtDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+const SEED_LISTINGS = [
+  { id: "s1", cat: "Coral", title: "WYSIWYG Rainbow Zoa Frag (5p)", price: 45, loc: "Melbourne, FL", seller: "frag_fiend", g: ["#ff7a5c", "#b06cff"] },
+  { id: "s2", cat: "Coral", title: "Gold Torch — 2 heads", price: 120, loc: "Orlando, FL", seller: "torch_lord", g: ["#ffc24d", "#ff7a5c"] },
+  { id: "s3", cat: "Equipment", title: "AI Prime 16HD (used)", price: 180, loc: "Palm Bay, FL", seller: "reef_recycle", g: ["#3fe3ff", "#1aa7c4"] },
+  { id: "s4", cat: "Fish", title: "Tank-bred Clownfish pair", price: 60, loc: "Cocoa, FL", seller: "nemo_nursery", g: ["#ff9d8a", "#ffc24d"] },
+  { id: "s5", cat: "Coral", title: "Green Birdsnest colony", price: 35, loc: "Viera, FL", seller: "sps_addict", g: ["#3ce0a3", "#2ee6c8"] },
+  { id: "s6", cat: "Equipment", title: "Jebao DCT-4000 return pump", price: 40, loc: "Titusville, FL", seller: "flowmaster", g: ["#2ee6c8", "#3fe3ff"] },
+  { id: "s7", cat: "Fish", title: "Yellow Watchman Goby", price: 28, loc: "Melbourne, FL", seller: "gobyguy", g: ["#ffc24d", "#3ce0a3"] },
+  { id: "s8", cat: "Coral", title: "Acan Lord — 4 polyp", price: 75, loc: "Rockledge, FL", seller: "acan_acres", g: ["#b06cff", "#ff5d72"] },
+];
+
+const LIBRARY = [
+  { id: "l1", cat: "Coral", name: "Hammer Coral", sci: "Euphyllia ancora", diff: "Easy", light: "Low–Med", flow: "Low–Med", g: ["#ffc24d", "#ff7a5c"], blurb: "A beginner-friendly LPS with flowing, hammer-shaped tentacles. Great movement and very forgiving of parameter swings." },
+  { id: "l2", cat: "Coral", name: "Zoanthids", sci: "Zoanthus sp.", diff: "Easy", light: "Med", flow: "Low–Med", g: ["#ff7a5c", "#b06cff"], blurb: "Colorful colonial polyps that come in endless morphs. Hardy and fast-spreading — a classic first coral." },
+  { id: "l3", cat: "Coral", name: "Duncan Coral", sci: "Duncanopsammia axifuga", diff: "Easy", light: "Low–Med", flow: "Low", g: ["#3fe3ff", "#2ee6c8"], blurb: "Polyp extension all day and eager to eat. Multiplies readily when fed and kept stable." },
+  { id: "l4", cat: "Coral", name: "Acanthastrea", sci: "Acanthastrea lordhowensis", diff: "Medium", light: "Low–Med", flow: "Low", g: ["#b06cff", "#ff5d72"], blurb: "Prized for intense rainbow coloration. Loves to be fed and rewards stable nutrients." },
+  { id: "l5", cat: "Fish", name: "Ocellaris Clownfish", sci: "Amphiprion ocellaris", diff: "Easy", light: "—", flow: "—", g: ["#ff7a5c", "#ffc24d"], blurb: "The iconic reef fish. Hardy, personable, tank-bred widely available. Often hosts in anemones or LPS." },
+  { id: "l6", cat: "Fish", name: "Royal Gramma", sci: "Gramma loreto", diff: "Easy", light: "—", flow: "—", g: ["#b06cff", "#ffc24d"], blurb: "Purple-to-gold stunner that's peaceful and reef safe. Likes caves and rockwork to dart between." },
+  { id: "l7", cat: "Fish", name: "Yellow Watchman Goby", sci: "Cryptocentrus cinctus", diff: "Easy", light: "—", flow: "—", g: ["#ffc24d", "#3ce0a3"], blurb: "Charismatic bottom-dweller that pairs with pistol shrimp. Reef safe and full of personality." },
+  { id: "l8", cat: "Invert", name: "Skunk Cleaner Shrimp", sci: "Lysmata amboinensis", diff: "Easy", light: "—", flow: "—", g: ["#ff9d8a", "#ffc24d"], blurb: "Active cleaner that sets up stations and picks parasites off fish. Reef safe and entertaining." },
+  { id: "l9", cat: "Invert", name: "Trochus Snail", sci: "Trochus sp.", diff: "Easy", light: "—", flow: "—", g: ["#84a8ba", "#3ce0a3"], blurb: "Workhorse algae grazer that can flip itself upright. Backbone of a nano cleanup crew." },
+  { id: "l10", cat: "Coral", name: "Green Star Polyps", sci: "Pachyclavularia sp.", diff: "Easy", light: "Med", flow: "Med", g: ["#3ce0a3", "#2ee6c8"], blurb: "Vivid green mat-forming soft coral. Bulletproof but spreads fast — keep it on its own island of rock." },
+];
+
+const SEED_POSTS = [
+  { id: "p1", user: "ReefMatt", handle: "saltlife_matt", tag: "Update", tagc: "#2ee6c8", time: "2h", body: "Two weeks of color-up on this Jason Fox chalice. Dialed alk down to 8.2 and held it rock steady — patience pays.", img: ["#ff7a5c", "#b06cff"], likes: 42, comments: 8 },
+  { id: "p2", user: "Coral Karen", handle: "karens_corals", tag: "Help", tagc: "#ffc24d", time: "5h", body: "Hammer coral started receding on one head overnight. Params all in range. Flow too high? Anyone seen this after a water change?", img: null, likes: 11, comments: 23 },
+  { id: "p3", user: "NanoNate", handle: "nano_nate", tag: "Build", tagc: "#3fe3ff", time: "1d", body: "Fusion 15 update — 8 months in. Running just an HOB skimmer and weekly 2g changes. Less is more on these little tanks.", img: ["#1aa7c4", "#2ee6c8"], likes: 67, comments: 14 },
+  { id: "p4", user: "FragSwap FL", handle: "fragswap_fl", tag: "Event", tagc: "#b06cff", time: "1d", body: "Brevard County frag swap — Saturday 10am at the Melbourne Auditorium. 30+ vendors confirmed. Bring containers!", img: null, likes: 95, comments: 31 },
+];
+
+const QUESTIONS = [
+  { id: "q1", user: "Joshua", time: "23h", c: "#b06cff", type: "Fish", img: ["#1aa7c4", "#3fe3ff"], body: "Not a good day for the tank! Lost 2 clowns this morning and now another looking really suspect. Still new to the saltwater life — is this velvet or Ich?? I don't have a QT tank…" },
+  { id: "q2", user: "Julio", time: "1d", c: "#ff7a5c", type: "Invert", img: ["#1aa7c4", "#0b2330"], body: "Does anyone know what these little white specks are? There's a ton of them crawling on the glass and they seem to hang out anywhere algae grows on the glass." },
+  { id: "q3", user: "Moon", time: "1d", c: "#ffc24d", type: "Coral", img: ["#ff9d8a", "#ffc24d"], body: "Got this free leather coral at my local Petco — you think they'll make it? They were a DOA shipment with their fish, you think they'll make it?" },
+  { id: "q4", user: "V.brooks", time: "2d", c: "#3ce0a3", type: "Coral", img: ["#2ee6c8", "#1aa7c4"], body: "Any suggestions on a good starter setup budget build? (Coral included if possible / frag). Photos coming soon!" },
+];
+const COMMUNITY_TANKS = [
+  { id: "t1", name: "Super Softy", time: "7m", g: ["#3fe3ff", "#1aa7c4"] },
+  { id: "t2", name: "Biocube 16", time: "9m", g: ["#b06cff", "#ff5d72"] },
+  { id: "t3", name: "40 G", time: "10m", g: ["#1aa7c4", "#2ee6c8"] },
+  { id: "t4", name: "75 Gal Tank", time: "21m", g: ["#ff7a5c", "#ffc24d"] },
+  { id: "t5", name: "JediReef", time: "34m", g: ["#3fe3ff", "#b06cff"] },
+];
+
+const NOTIFS = [
+  { id: 1, who: "torch_lord", txt: "liked your Gold Hammer post", time: "12m", c: "#ff7a5c" },
+  { id: 2, who: "frag_fiend", txt: "sent you a message about the Rainbow Zoas", time: "1h", c: "#b06cff" },
+  { id: 3, who: "Tidepool Reef", txt: "Your nitrate is trending up — tap to see DeepDive's read", time: "3h", c: "#3fe3ff" },
+  { id: 4, who: "nano_nate", txt: "started following you", time: "5h", c: "#2ee6c8" },
+  { id: 5, who: "FragSwap FL", txt: "posted an event near Melbourne, FL", time: "1d", c: "#ffc24d" },
+  { id: 6, who: "acan_acres", txt: "replied to your comment", time: "1d", c: "#ff5d72" },
+];
+
+function statusOf(p, v) {
+  if (v == null) return "warn";
+  if (v < p.min || v > p.max) return "bad";
+  if (v < p.ideal[0] || v > p.ideal[1]) return "warn";
+  return "good";
+}
+const sclass = { good: "s-good", warn: "s-warn", bad: "s-bad" };
+function dueLabel(due) {
+  const diff = due - Date.now();
+  if (diff < -dayMs / 2) return { t: "Overdue", c: "due-over" };
+  if (diff < dayMs) return { t: "Due today", c: "due-soon" };
+  if (diff < 2 * dayMs) return { t: "Due tomorrow", c: "due-soon" };
+  return { t: "Due " + fmtDate(due), c: "due-ok" };
+}
+const everyMs = { "Every 2 days": 2 * dayMs, Weekly: 7 * dayMs, Biweekly: 14 * dayMs, Monthly: 30 * dayMs };
+const diffColor = { Easy: "#3ce0a3", Medium: "#ffc24d", Hard: "#ff5d72" };
+
+/* ---------------- Supabase ---------------- */
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://dhluuqpdbshvhnskyprb.supabase.co";
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || "sb_publishable_9RMUI6qMi33Ju4ATaudIlQ_JxmkxPKb";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const DEFAULT_TASKS = [
+  { name: "Water change (2 gal)", every: "Weekly", offset: 0 },
+  { name: "Test parameters", every: "Weekly", offset: dayMs },
+  { name: "Dose 2-part", every: "Every 2 days", offset: 0 },
+  { name: "Clean skimmer cup", every: "Weekly", offset: 2 * dayMs },
+  { name: "Replace filter floss", every: "Biweekly", offset: 5 * dayMs },
+];
+const PALETTE = [["#3fe3ff", "#b06cff"], ["#ff7a5c", "#ffc24d"], ["#2ee6c8", "#1aa7c4"], ["#b06cff", "#ff5d72"], ["#3ce0a3", "#2ee6c8"]];
+const KIND_COLOR = { Fish: "#ff7a5c", Coral: "#2ee6c8", Invert: "#84a8ba" };
+const TAG_COLOR = { Update: "#3fe3ff", Help: "#ffc24d", Build: "#2ee6c8", Event: "#b06cff" };
+function rel(ts) {
+  const s = (Date.now() - new Date(ts).getTime()) / 1000;
+  if (s < 60) return "now";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h";
+  return Math.floor(s / 86400) + "d";
+}
+
+async function fetchAll(uid) {
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", uid).single();
+  let { data: tanks } = await supabase.from("tanks").select("*").eq("owner_id", uid).order("created_at").limit(1);
+  let tank = tanks && tanks[0];
+  if (!tank) {
+    const { data: created, error } = await supabase.from("tanks")
+      .insert({ owner_id: uid, name: (profile && profile.display_name) || "My Reef", model: "IM NuVo Fusion 15", volume_gal: 15, since: "2025" })
+      .select().single();
+    if (error) throw error;
+    tank = created;
+    await supabase.from("tasks").insert(DEFAULT_TASKS.map((t) => ({
+      tank_id: tank.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
+    })));
+  }
+  const [pr, lr, tr, gr, mr, sr, kr] = await Promise.all([
+    supabase.from("parameters").select("*").eq("tank_id", tank.id).order("measured_at"),
+    supabase.from("livestock").select("*").eq("tank_id", tank.id).order("created_at"),
+    supabase.from("tasks").select("*").eq("tank_id", tank.id),
+    supabase.from("tank_log").select("*").eq("tank_id", tank.id).order("created_at", { ascending: false }),
+    supabase.from("listings").select("*, seller:profiles(handle)").eq("status", "active").order("created_at", { ascending: false }).limit(50),
+    supabase.from("posts").select("*, author:profiles(handle, display_name), post_likes(count)").order("created_at", { ascending: false }).limit(50),
+    supabase.from("post_likes").select("post_id").eq("profile_id", uid),
+  ]);
+  const liked = {};
+  (kr.data || []).forEach((r) => (liked[r.post_id] = true));
+  return {
+    uid,
+    profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
+    pearls: (profile && profile.pearls) != null ? profile.pearls : 100,
+    tankId: tank.id,
+    tank: { name: tank.name, model: tank.model || "", volume: tank.volume_gal || 15, since: tank.since || "2025" },
+    history: (pr.data || []).map((r) => ({
+      date: new Date(r.measured_at).getTime(),
+      alk: r.alk, cal: r.cal, mag: r.mag, no3: r.no3, po4: r.po4, ph: r.ph, sal: r.sal, temp: r.temp,
+    })),
+    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff" })),
+    tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
+    log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
+    listings: (mr.data || []).map((r, i) => ({
+      id: r.id, cat: r.category, title: r.title, price: Number(r.price_usd),
+      loc: r.location || "", seller: (r.seller && r.seller.handle) || "reefer", g: PALETTE[i % PALETTE.length],
+    })),
+    posts: (sr.data || []).map((r) => ({
+      id: r.id, user: (r.author && (r.author.display_name || r.author.handle)) || "reefer",
+      handle: (r.author && r.author.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
+      time: rel(r.created_at), body: r.body, img: null,
+      likes: (r.post_likes && r.post_likes[0] && r.post_likes[0].count) || 0, comments: 0,
+    })),
+    liked,
+  };
+}
+
+/* AI via Netlify function proxy (key stays server-side) */
+async function askReefAI(messages, system) {
+  const res = await fetch("/api/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ max_tokens: 1000, system, messages }),
+  });
+  const data = await res.json();
+  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+}
+
+/* coral avatar */
+function CoralAvatar({ size = 56 }) {
+  return (
+    <div className="rb-av ring" style={{ width: size, height: size }}>
+      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 48 48">
+        <path d="M14 44c-1-8 1-13-2-18-2-3 0-7 3-6 1-5 5-6 6-1 2-4 6-3 5 1 3-1 5 2 3 5-2 4-1 9-2 19z" fill="#b06cff"/>
+        <path d="M30 44c0-7-1-11 2-15 2-3 6-2 5 2 2-2 5 0 4 3-1 2 0 6-1 10z" fill="#3ce0a3"/>
+        <path d="M22 44c0-5 0-9-1-12 2-1 4 1 3 4 1 0 2 2 1 4z" fill="#3fe3ff"/>
+      </svg>
+    </div>
+  );
+}
+
+function ReefLogo() {
+  return (
+    <div className="rb-logowrap"><div className="rb-logo">
+      <span className="a">Tidepool</span> <span className="b">Reef</span>
+      <svg className="rb-wave" viewBox="0 0 60 6" preserveAspectRatio="none">
+        <path d="M0 3 Q7 0 14 3 T28 3 T42 3 T56 3" stroke="#3f9bff" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+      </svg>
+    </div></div>
+  );
+}
+
+/* ---------------- Auth ---------------- */
+function AuthScreen() {
+  const [mode, setMode] = useState("signin"); // signin | signup
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [handle, setHandle] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async () => {
+    setBusy(true); setMsg("");
+    try {
+      if (mode === "signup") {
+        const clean = handle.trim().replace(/[^a-zA-Z0-9_]/g, "");
+        if (clean.length < 2) { setMsg("Pick a handle (letters, numbers, underscores)."); setBusy(false); return; }
+        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password: pw, options: { data: { handle: clean } } });
+        if (error) setMsg(error.message);
+        else if (!data.session) setMsg("Check your email to confirm your account, then sign in.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
+        if (error) setMsg(error.message);
+      }
+    } catch (e) { setMsg("Something went wrong — try again."); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="rb-root"><style>{STYLES}</style>
+      <div className="rb-shell" style={{ paddingTop: 70 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}><CoralAvatar size={84} /></div>
+        <ReefLogo />
+        <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13.5, margin: "10px 0 24px" }}>
+          Track your reef. Trade frags. Talk coral.
+        </div>
+        <div className="rb-card" style={{ padding: 18 }}>
+          <div className="rb-tabs" style={{ margin: "0 0 14px" }}>
+            <div className={"rb-chip" + (mode === "signin" ? " on" : "")} onClick={() => setMode("signin")}>Sign in</div>
+            <div className={"rb-chip" + (mode === "signup" ? " on" : "")} onClick={() => setMode("signup")}>Create account</div>
+          </div>
+          {mode === "signup" && (
+            <div className="rb-field"><label>Handle</label>
+              <input className="rb-input" placeholder="e.g. JediReef" value={handle} onChange={(e) => setHandle(e.target.value)} autoCapitalize="none" />
+            </div>
+          )}
+          <div className="rb-field"><label>Email</label>
+            <input className="rb-input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" />
+          </div>
+          <div className="rb-field"><label>Password</label>
+            <input className="rb-input" type="password" placeholder="••••••••" value={pw} onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && email && pw && !busy) submit(); }} />
+          </div>
+          {msg && <div style={{ color: "var(--warn)", fontSize: 13, marginBottom: 10, lineHeight: 1.4 }}>{msg}</div>}
+          <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!email || !pw || busy} onClick={submit}>
+            {busy ? "One sec…" : mode === "signup" ? "Create account" : "Sign in"}
+          </button>
+        </div>
+        <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 16 }}>
+          Your data syncs across devices. Marketplace listings and posts are visible to other reefers.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ======================================================================= */
+/*  Main                                                                    */
+/* ======================================================================= */
+export default function TidepoolReef() {
+  const [state, setState] = useState(null);
+  const [view, setView] = useState("feed");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
+  const [drawer, setDrawer] = useState(false);
+  const [sel, setSel] = useState("alk");
+  const [cat, setCat] = useState("All");
+  const [libCat, setLibCat] = useState("All");
+  const [sheet, setSheet] = useState(null);        // log|sell|libDetail
+  const [libItem, setLibItem] = useState(null);
+  const [toast, setToast] = useState(0);
+
+  const [session, setSession] = useState(undefined); // undefined=checking, null=signed out
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => sub.subscription.unsubscribe();
+  }, []);
+  useEffect(() => {
+    if (session && session.user) { setState(null); fetchAll(session.user.id).then(setState).catch((e) => console.error("load failed", e)); }
+  }, [session && session.user && session.user.id]);
+
+  const latest = useMemo(() => (state && state.history.length ? state.history[state.history.length - 1] : null), [state]);
+  const award = async (n) => {
+    setToast(n); setTimeout(() => setToast(0), 2000);
+    const { data } = await supabase.rpc("award_pearls", { amount: n });
+    if (typeof data === "number") setState((s) => (s ? { ...s, pearls: data } : s));
+  };
+
+  if (session === undefined) {
+    return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
+      <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
+  }
+  if (session === null) return <AuthScreen />;
+  if (!state) {
+    return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
+      <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
+  }
+
+  const allListings = [...state.listings, ...SEED_LISTINGS];
+  const allPosts = [...state.posts, ...SEED_POSTS];
+  const issues = latest ? PARAMS.filter((p) => statusOf(p, latest[p.key]) !== "good") : [];
+  const corals = state.livestock.filter((l) => l.type === "Coral").length;
+  const fish = state.livestock.filter((l) => l.type === "Fish").length;
+
+  /* actions — optimistic local update, then persist to Supabase */
+  const completeTask = async (id) => {
+    const t = state.tasks.find((x) => x.id === id); if (!t) return;
+    const due = Date.now() + (everyMs[t.every] || 7 * dayMs);
+    setState((s) => ({ ...s, tasks: s.tasks.map((x) => (x.id === id ? { ...x, due } : x)) }));
+    await supabase.from("tasks").update({ due_at: new Date(due).toISOString() }).eq("id", id);
+    award(2);
+  };
+  const saveLog = async (vals) => {
+    setState((s) => ({ ...s, history: [...s.history, { date: Date.now(), ...vals }] }));
+    await supabase.from("parameters").insert({ tank_id: state.tankId, ...vals });
+    award(5);
+  };
+  const addLogEntry = async (type, note) => {
+    setState((s) => ({ ...s, log: [{ id: "tmp" + Date.now(), date: Date.now(), type, note }, ...s.log] }));
+    await supabase.from("tank_log").insert({ tank_id: state.tankId, entry_type: type, note });
+    award(5);
+  };
+  const addLivestock = async (kind, name, note) => {
+    const c = KIND_COLOR[kind] || "#3fe3ff";
+    setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: note || "", c }] }));
+    await supabase.from("livestock").insert({ tank_id: state.tankId, kind, name, note: note || null, color: c });
+  };
+  const addListing = async (l) => {
+    const loc = state.profile.location || "Florida, United States";
+    setState((s) => ({ ...s, listings: [{ ...l, id: "tmp" + Date.now(), seller: s.profile.handle, loc, g: PALETTE[0] }, ...s.listings] }));
+    await supabase.from("listings").insert({ seller_id: state.uid, category: l.cat, title: l.title, price_usd: l.price, location: loc });
+    award(3);
+  };
+  const addPost = async (body) => {
+    setState((s) => ({ ...s, posts: [{ id: "tmp" + Date.now(), user: s.profile.display_name || s.profile.handle, handle: s.profile.handle, tag: "Update", tagc: "#3fe3ff", time: "now", body, img: null, likes: 0, comments: 0 }, ...s.posts] }));
+    await supabase.from("posts").insert({ author_id: state.uid, tag: "Update", body });
+    award(3);
+  };
+  const toggleLike = async (id) => {
+    const had = !!state.liked[id];
+    setState((s) => ({ ...s, liked: { ...s.liked, [id]: !had } }));
+    if (String(id).startsWith("p") || String(id).startsWith("tmp")) return; // seed/optimistic posts aren't in DB
+    if (had) await supabase.from("post_likes").delete().eq("post_id", id).eq("profile_id", state.uid);
+    else await supabase.from("post_likes").insert({ post_id: id, profile_id: state.uid });
+  };
+
+  const TITLES = { feed: "Feed", library: "Library", shop: "Shop", tasks: "Tasks", profile: "My Profile",
+    params: "Parameter Tracker", tanklog: "Tank Log", reefid: "Reef ID", deepdive: "Tidepool DeepDive",
+    notifications: "Notifications", messages: "Messages", purchases: "Purchases", seller: "Seller Hub", settings: "Settings" };
+  const isTab = ["feed", "library", "shop", "tasks", "profile"].includes(view);
+  const taskCount = state.tasks.filter((t) => t.due - Date.now() < dayMs).length;
+
+  const go = (v) => { setView(v); setDrawer(false); };
+
+  return (
+    <div className="rb-root">
+      <style>{STYLES}</style>
+
+      {/* top bar */}
+      <div className="rb-shell">
+        <div className="rb-top">
+          {isTab
+            ? <div className="rb-iconbtn" onClick={() => setDrawer(true)}><Menu size={20} /></div>
+            : <div className="rb-iconbtn" onClick={() => go("feed")}><ChevronLeft size={20} /></div>}
+          {isTab ? <ReefLogo /> : <div className="rb-title" style={{ flex: 1, textAlign: "center" }}>{TITLES[view]}</div>}
+          <div className="rb-avbtn" onClick={() => go("profile")}><CoralAvatar size={42} /><span className="rb-avdot" /></div>
+        </div>
+
+        {/* views */}
+        {view === "feed" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
+        {view === "library" && <Library {...{ libCat, setLibCat, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
+        {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
+        {view === "tasks" && <Tasks {...{ state, completeTask }} />}
+        {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
+        {view === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} />}
+        {view === "tanklog" && <TankLog {...{ state, addLogEntry }} />}
+        {view === "reefid" && <ReefID />}
+        {view === "deepdive" && <DeepDive {...{ state, latest, issues }} />}
+        {view === "notifications" && <Notifications />}
+        {view === "messages" && <Messages />}
+        {view === "purchases" && <Purchases />}
+        {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell") }} />}
+        {view === "settings" && <SettingsView tank={state.tank} />}
+      </div>
+
+      {/* contextual FAB */}
+      {view === "params" && <button className="rb-fab" onClick={() => setSheet("log")}><Beaker size={24} /></button>}
+      {(view === "shop" || view === "seller") && <button className="rb-fab" onClick={() => setSheet("sell")}><Tag size={22} /></button>}
+
+      {/* bottom nav */}
+      <nav className="rb-nav">
+        {[["feed", Newspaper, "Feed"], ["library", BookOpen, "Library"], ["shop", Store, "Shop"], ["tasks", ListChecks, "Tasks"], ["profile", User, "Profile"]]
+          .map(([k, Icon, lbl]) => (
+            <div key={k} className={"rb-navi" + (view === k ? " on" : "")} onClick={() => go(k)}>
+              <div style={{ position: "relative" }}><Icon size={20} />{k === "tasks" && taskCount > 0 && <span className="rb-navbadge">{taskCount}</span>}</div>
+              <span>{lbl}</span>
+            </div>
+          ))}
+      </nav>
+
+      {/* drawer */}
+      {drawer && (
+        <>
+          <div className="rb-scrim" onClick={() => setDrawer(false)} />
+          <div className="rb-drawer">
+            <div className="rb-dhead" onClick={() => go("profile")}>
+              <CoralAvatar size={84} />
+              <div className="h">@{state.profile.handle}</div>
+              <div className="rb-pearls" style={{ marginTop: 10 }}><span className="rb-pearl" />Pearls: {state.pearls}</div>
+              <div className="rb-dloc"><MapPin size={13} /> {state.profile.location || "Florida, United States"}</div>
+            </div>
+            <div className="rb-mdiv" />
+            {[
+              ["params", FlaskConical, "Parameter Tracker"],
+              ["tanklog", Notebook, "Tank Log"],
+              ["reefid", Camera, "Reef ID"],
+              ["deepdive", Bot, "Tidepool DeepDive", "dot"],
+              ["notifications", Bell, "Notifications", "47"],
+              ["messages", MessageCircle, "Messages"],
+              ["purchases", Receipt, "Purchases"],
+              ["seller", Store, "Seller Hub"],
+              ["settings", Settings, "Settings"],
+            ].map(([k, Icon, lbl, extra]) => (
+              <div key={k} className="rb-mitem" onClick={() => go(k)}>
+                <span className="ic"><Icon size={20} /></span>{lbl}
+                {extra === "dot" && <span className="reldot" />}
+                {extra && extra !== "dot" && <span className="badge">{extra}</span>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* sheets */}
+      {sheet === "log" && <LogSheet latest={latest} onClose={() => setSheet(null)} onSave={saveLog} />}
+      {sheet === "sell" && <SellSheet onClose={() => setSheet(null)} onSave={addListing} />}
+      {sheet === "libDetail" && libItem && <LibDetail item={libItem} onClose={() => setSheet(null)} />}
+
+      {toast > 0 && <div className="rb-toast"><span className="rb-pearl" />+{toast} Pearls</div>}
+    </div>
+  );
+}
+
+/* ---------------- Profile ---------------- */
+function Profile({ state, fish, corals, issues, go }) {
+  const t = state.tank;
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card rb-phero">
+        <div className="glow" />
+        <CoralAvatar size={84} />
+        <div className="h">{state.profile.display_name || state.profile.handle}</div>
+        <div className="ha">@{state.profile.handle}</div>
+        <div className="rb-dloc" style={{ justifyContent: "center", marginTop: 8 }}><MapPin size={13} /> {state.profile.location || "Florida, United States"}</div>
+        <div className="rb-badges">
+          <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)" }}>Reefing since {state.profile.reefing_since || state.tank.since}</span>
+          <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)" }}><Sparkles size={12} /> DeepDive</span>
+          <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)" }}><Award size={12} /> Founding Reefer</span>
+        </div>
+        <div className="rb-stats">
+          <div className="rb-stat"><div className="v">1</div><div className="k">Tank</div></div>
+          <div className="rb-stat"><div className="v">{fish}</div><div className="k">Fish</div></div>
+          <div className="rb-stat"><div className="v">{corals}</div><div className="k">Corals</div></div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
+        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("feed")}><PenSquare size={15} /> Create Post</button>
+      </div>
+
+      <div className="rb-h2"><Waves size={16} color="var(--teal)" /> My Tank <small>{t.model}</small></div>
+      <div className="rb-tankhero">
+        <div className="light" /><div className="rock" />
+        <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
+        <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
+        <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
+        <div className="acts">
+          <div onClick={() => go("tanklog")}><Notebook size={17} color="var(--text)" /></div>
+          <div onClick={() => go("params")}><FlaskConical size={17} color="var(--text)" /></div>
+          <div onClick={() => go("feed")}><PenSquare size={17} color="var(--text)" /></div>
+        </div>
+      </div>
+
+      <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Tank health <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
+      <div className="rb-card">
+        {issues.length === 0 && <div className="rb-empty">All parameters in range. 🪸</div>}
+        {issues.map((p) => {
+          const st = statusOf(p, state.history[state.history.length - 1][p.key]);
+          return (
+            <div key={p.key} className="rb-li" onClick={() => go("params")}>
+              <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
+              <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+              <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Feed ---------------- */
+function Feed({ allPosts, liked, toggleLike, addPost }) {
+  const [draft, setDraft] = useState("");
+  const [q, setQ] = useState("");
+  return (
+    <div className="rb-fadein">
+      <div className="rb-searchrow">
+        <div className="rb-iconbtn sm"><MapPin size={17} color="var(--aqua)" /></div>
+        <div className="rb-searchpill"><Search size={16} color="var(--muted)" /><input placeholder="Search coral…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
+        <div className="rb-iconbtn sm"><SlidersHorizontal size={17} /></div>
+      </div>
+
+      <div className="rb-sec"><h3>Community Questions</h3><p>Share your knowledge and help fellow reefers</p></div>
+      <div className="rb-hscroll">
+        {QUESTIONS.map((qq) => (
+          <div key={qq.id} className="rb-card rb-qcard">
+            <div className="rb-phead">
+              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${qq.c},var(--violet))` }}>{qq.user[0]}</div>
+              <div><div className="u">{qq.user}</div></div>
+              <span className="meta" style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>{qq.time}</span>
+            </div>
+            <div className="rb-pbody rb-clamp">{qq.body}</div>
+            <div className="rb-qimg" style={{ background: `linear-gradient(140deg,${qq.img[0]},${qq.img[1]})` }}>
+              {qq.type === "Fish" ? <Fish size={30} /> : qq.type === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-sec"><h3>Recent Parameters</h3><p>Latest updates from the community</p></div>
+      <div className="rb-hscroll">
+        {COMMUNITY_TANKS.map((t) => (
+          <div key={t.id} className="rb-card rb-tcard">
+            <div className="rb-tcard-h"><b>{t.name}</b><span>{t.time}</span></div>
+            <div className="rb-timg" style={{ background: `linear-gradient(140deg,${t.g[0]},${t.g[1]})` }}><Waves size={30} /></div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-sec"><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
+      <div className="rb-card rb-compose">
+        <CoralAvatar size={40} />
+        <div style={{ flex: 1 }}>
+          <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div style={{ textAlign: "right", marginTop: 8 }}>
+            <button className="rb-btn" disabled={!draft.trim()} onClick={() => { addPost(draft.trim()); setDraft(""); }}><Send size={15} /> Post</button>
+          </div>
+        </div>
+      </div>
+      {allPosts.map((post) => {
+        const isLiked = liked[post.id];
+        return (
+          <div key={post.id} className="rb-card rb-post">
+            <div className="rb-phead">
+              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${post.tagc},var(--violet))` }}>{post.user[0]}</div>
+              <div><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
+              <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
+            </div>
+            <div className="rb-pbody">{post.body}</div>
+            {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
+            <div className="rb-pacts">
+              <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}><Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes + (isLiked ? 1 : 0)}</span>
+              <span><MessageCircle size={16} /> {post.comments}</span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------------- Library ---------------- */
+function Library({ libCat, setLibCat, openItem }) {
+  const [q, setQ] = useState("");
+  const cats = ["All", "Coral", "Fish", "Invert"];
+  const shown = LIBRARY.filter((l) => (libCat === "All" || l.cat === libCat) && (l.name.toLowerCase().includes(q.toLowerCase()) || l.sci.toLowerCase().includes(q.toLowerCase())));
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
+        <Search size={17} color="var(--muted)" />
+        <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }} placeholder="Search corals, fish, inverts…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="rb-tabs" style={{ marginTop: 14 }}>
+        {cats.map((c) => <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => setLibCat(c)}>{c}</div>)}
+      </div>
+      <div className="rb-mgrid">
+        {shown.map((l) => (
+          <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
+            <div className="rb-mimg" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}>
+              <span className="cat">{l.cat}</span>
+              {l.cat === "Fish" ? <Fish size={30} /> : l.cat === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
+            </div>
+            <div className="rb-mbody">
+              <div className="t">{l.name}</div>
+              <div className="sci">{l.sci}</div>
+              <div className="rb-care">
+                <span style={{ color: diffColor[l.diff], borderColor: diffColor[l.diff] + "66" }}>{l.diff}</span>
+                {l.light !== "—" && <span>☀ {l.light}</span>}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LibDetail({ item, onClose }) {
+  const [tips, setTips] = useState("");
+  const [busy, setBusy] = useState(false);
+  const getTips = async () => {
+    setBusy(true);
+    try {
+      const r = await askReefAI(
+        [{ role: "user", content: `Give 3 concise, practical care tips for keeping ${item.name} (${item.sci}) in a 15-gallon nano reef. Bullet points, one line each.` }],
+        "You are Reef AI, an expert reef-aquarium advisor. Be concise and specific."
+      );
+      setTips(r || "Couldn't load tips right now.");
+    } catch (e) { setTips("Couldn't reach DeepDive right now."); }
+    setBusy(false);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>{item.name}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${item.g[0]},${item.g[1]})`, height: 150 }}>
+          {item.cat === "Fish" ? <Fish size={40} /> : item.cat === "Invert" ? <Shell size={40} /> : <Waves size={40} />}
+        </div>
+        <div style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13, marginBottom: 10 }}>{item.sci} · {item.cat}</div>
+        <div className="rb-care" style={{ marginBottom: 12 }}>
+          <span style={{ color: diffColor[item.diff], borderColor: diffColor[item.diff] + "66" }}>Care: {item.diff}</span>
+          {item.light !== "—" && <span>Light: {item.light}</span>}
+          {item.flow !== "—" && <span>Flow: {item.flow}</span>}
+        </div>
+        <div style={{ fontSize: 14, lineHeight: 1.55, color: "#d8eef5" }}>{item.blurb}</div>
+        {tips && <div className="rb-card" style={{ padding: 14, marginTop: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
+        <button className="rb-btn violet" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={getTips} disabled={busy}>
+          <Bot size={16} /> {busy ? "Asking DeepDive…" : "Care tips from DeepDive"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Shop ---------------- */
+function Shop({ allListings, cat, setCat }) {
+  const cats = ["All", "Coral", "Fish", "Equipment"];
+  const shown = cat === "All" ? allListings : allListings.filter((l) => l.cat === cat);
+  return (
+    <div className="rb-fadein">
+      <div className="rb-tabs" style={{ marginTop: 6 }}>
+        {cats.map((c) => <div key={c} className={"rb-chip" + (cat === c ? " on" : "")} onClick={() => setCat(c)}>{c}</div>)}
+      </div>
+      <div className="rb-mgrid">
+        {shown.map((l) => (
+          <div key={l.id} className="rb-card rb-mcard">
+            <div className="rb-mimg" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}>
+              <span className="cat">{l.cat}</span>
+              {l.cat === "Fish" ? <Fish size={30} /> : l.cat === "Equipment" ? <Droplets size={30} /> : <Waves size={30} />}
+            </div>
+            <div className="rb-mbody">
+              <div className="t">{l.title}</div><div className="p">${l.price}</div>
+              <div className="loc"><MapPin size={11} /> {l.loc} · @{l.seller}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tasks ---------------- */
+function Tasks({ state, completeTask }) {
+  return (
+    <div className="rb-fadein">
+      <div className="rb-h2" style={{ marginTop: 6 }}><ListChecks size={16} color="var(--coral)" /> Maintenance <small>tap to complete · +2 Pearls</small></div>
+      <div className="rb-card">
+        {[...state.tasks].sort((a, b) => a.due - b.due).map((t) => {
+          const d = dueLabel(t.due);
+          return (
+            <div key={t.id} className="rb-task" onClick={() => completeTask(t.id)}>
+              <div className="rb-check"><Check size={15} style={{ opacity: 0 }} /></div>
+              <div><div className="nm">{t.name}</div><div className={"when " + d.c}>{d.t}</div></div>
+              <span className="rb-pill">{t.every}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="rb-h2"><Calendar size={16} color="var(--aqua)" /> This week</div>
+      <div className="rb-card" style={{ padding: 16, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6 }}>
+        Stay on a weekly rhythm: test → 2-gal water change → dose to target. Completing tasks earns Pearls you can spend in the Shop.
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tracker ---------------- */
+function Tracker({ state, latest, sel, setSel, addLivestock }) {
+  const [lsName, setLsName] = useState("");
+  const [lsKind, setLsKind] = useState("Coral");
+  const p = PARAMS.find((x) => x.key === sel);
+  const chartData = state.history.map((h) => ({ date: h.date, v: h[sel] }));
+  const prev = state.history.length > 1 ? state.history[state.history.length - 2][sel] : latest ? latest[sel] : 0;
+  const delta = latest ? +(latest[sel] - prev).toFixed(p.dec) : 0;
+  return (
+    <div className="rb-fadein">
+      <div className="rb-h2" style={{ marginTop: 6 }}><FlaskConical size={16} color="var(--aqua)" /> Parameters <small>tap to chart</small></div>
+      {!latest && (
+        <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
+          <Beaker size={28} color="var(--aqua)" style={{ opacity: .85 }} />
+          <div style={{ marginTop: 10, fontWeight: 600, color: "var(--text)" }}>No test results yet</div>
+          <div style={{ marginTop: 5 }}>Tap the flask button below to log your first reading — charts and health tracking start from there.</div>
+        </div>
+      )}
+      {latest && (<>
+      <div className="rb-grid">
+        {PARAMS.map((pp) => {
+          const st = statusOf(pp, latest[pp.key]);
+          return (
+            <div key={pp.key} className={"rb-card rb-pcard" + (sel === pp.key ? " sel" : "")} onClick={() => setSel(pp.key)}>
+              <div className="top"><span className="lbl">{pp.label}</span><span className={"rb-sdot " + sclass[st]} /></div>
+              <div className="val">{latest[pp.key]}<u>{pp.unit}</u></div>
+              <div className="rb-trend">target {pp.ideal[0]}–{pp.ideal[1]}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="rb-card rb-chartwrap" style={{ marginTop: 12 }}>
+        <div className="rb-chart-h"><b>{p.label} trend</b>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{delta === 0 ? "no change" : (delta > 0 ? "▲ " : "▼ ") + Math.abs(delta) + " " + p.unit}</span>
+        </div>
+        <ResponsiveContainer width="100%" height={200}>
+          <LineChart data={chartData} margin={{ top: 8, right: 14, left: -8, bottom: 4 }}>
+            <CartesianGrid stroke="rgba(255,255,255,.05)" vertical={false} />
+            <ReferenceArea y1={p.ideal[0]} y2={p.ideal[1]} fill="#3ce0a3" fillOpacity={0.1} />
+            <XAxis dataKey="date" tickFormatter={fmtDate} stroke="var(--muted-2)" fontSize={11} tickLine={false} axisLine={false} minTickGap={28} />
+            <YAxis domain={[p.min, p.max]} stroke="var(--muted-2)" fontSize={11} tickLine={false} axisLine={false} width={42} />
+            <Tooltip content={({ active, payload }) => active && payload && payload.length ? (
+              <div style={{ background: "var(--bg-2)", border: "1px solid var(--brd-2)", borderRadius: 10, padding: "7px 11px", fontSize: 12 }}>
+                <div style={{ color: "var(--muted)" }}>{fmtDate(payload[0].payload.date)}</div>
+                <div style={{ fontWeight: 700, color: "var(--aqua)" }}>{payload[0].value} {p.unit}</div>
+              </div>) : null} />
+            <Line type="monotone" dataKey="v" stroke="var(--aqua)" strokeWidth={2.5} dot={{ r: 2.5, fill: "var(--aqua)" }} activeDot={{ r: 5 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      </>)}
+      <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{state.livestock.length} in tank</small></div>
+      <div className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
+        <div className="rb-tabs" style={{ margin: "0 0 10px" }}>
+          {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (lsKind === k ? " on" : "")} onClick={() => setLsKind(k)}>{k}</div>)}
+        </div>
+        <div style={{ display: "flex", gap: 9 }}>
+          <input className="rb-input" placeholder={lsKind === "Fish" ? "e.g. Royal Gramma" : lsKind === "Invert" ? "e.g. Cleaner Shrimp" : "e.g. Gold Hammer"} value={lsName}
+            onChange={(e) => setLsName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && lsName.trim()) { addLivestock(lsKind, lsName.trim()); setLsName(""); } }} />
+          <button className="rb-btn" disabled={!lsName.trim()} onClick={() => { addLivestock(lsKind, lsName.trim()); setLsName(""); }}><Plus size={16} /></button>
+        </div>
+      </div>
+      <div className="rb-card">
+        {state.livestock.length === 0 && <div className="rb-empty">Nothing in the tank yet — add your first coral, fish, or invert above.</div>}
+        {state.livestock.map((l) => (
+          <div key={l.id} className="rb-li">
+            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.c},#0b2b3d)` }}>
+              {l.type === "Fish" ? <Fish size={20} color="#04111a" /> : l.type === "Coral" ? <Waves size={20} color="#04111a" /> : <Shell size={20} color="#04111a" />}
+            </div>
+            <div><div className="nm">{l.name}</div><div className="sub">{l.type}{l.note ? " · " + l.note : ""}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Tank Log ---------------- */
+function TankLog({ state, addLogEntry }) {
+  const [type, setType] = useState("Water Change");
+  const [note, setNote] = useState("");
+  const types = ["Water Change", "Dosing", "Addition", "Observation"];
+  const typeColor = { "Water Change": "#3fe3ff", Dosing: "#3ce0a3", Addition: "#ffc24d", Observation: "#b06cff" };
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
+        <div className="rb-tabs" style={{ margin: "0 0 12px" }}>
+          {types.map((c) => <div key={c} className={"rb-chip" + (type === c ? " on" : "")} onClick={() => setType(c)}>{c}</div>)}
+        </div>
+        <textarea className="rb-input" rows={2} placeholder="What happened in the tank?" value={note} onChange={(e) => setNote(e.target.value)} />
+        <button className="rb-btn" style={{ width: "100%", marginTop: 10, padding: 12 }} disabled={!note.trim()}
+          onClick={() => { addLogEntry(type, note.trim()); setNote(""); }}><Plus size={16} /> Add log entry</button>
+      </div>
+      <div className="rb-h2"><Notebook size={16} color="var(--aqua)" /> Journal <small>{state.log.length} entries</small></div>
+      <div className="rb-card">
+        {state.log.length === 0 && <div className="rb-empty">No journal entries yet — log your first water change or observation above.</div>}
+        {state.log.map((e) => (
+          <div key={e.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${typeColor[e.type] || "#3fe3ff"},#0b2b3d)` }}><Droplets size={18} color="#04111a" /></div>
+            <div><div className="nm">{e.type} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {fmtDate(e.date)}</span></div><div className="sub" style={{ lineHeight: 1.45 }}>{e.note}</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Reef ID (Claude vision) ---------------- */
+function ReefID() {
+  const [img, setImg] = useState(null);     // {b64, media, url}
+  const [result, setResult] = useState("");
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef(null);
+
+  const onFile = (e) => {
+    const f = e.target.files && e.target.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { const s = reader.result; setImg({ b64: s.split(",")[1], media: f.type || "image/jpeg", url: s }); setResult(""); };
+    reader.readAsDataURL(f);
+  };
+  const identify = async () => {
+    if (!img) return; setBusy(true); setResult("");
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          max_tokens: 1000,
+          system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species. Reply with: Common name, Scientific name (best guess), Type, Care difficulty, and 2 quick care tips. If you can't tell, say so and list possibilities. Keep it concise.",
+          messages: [{ role: "user", content: [
+            { type: "image", source: { type: "base64", media_type: img.media, data: img.b64 } },
+            { type: "text", text: "Identify this reef tank inhabitant and give quick care basics." },
+          ] }],
+        }),
+      });
+      const data = await res.json();
+      const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
+      setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
+    } catch (e) { setResult("Couldn't reach Reef ID right now. Check the connection and try again."); }
+    setBusy(false);
+  };
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
+        <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 14 }}>
+          Snap or upload a photo of any coral, fish, or invert and DeepDive will identify it and give you care basics.
+        </div>
+        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onFile} />
+        {img
+          ? <img className="rb-preview" src={img.url} alt="to identify" />
+          : <div className="rb-drop" onClick={() => fileRef.current && fileRef.current.click()}>
+              <Camera size={30} style={{ opacity: .8 }} /><div style={{ marginTop: 10, fontWeight: 600 }}>Tap to take or upload a photo</div>
+            </div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          {img && <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => fileRef.current && fileRef.current.click()}><Upload size={15} /> Change</button>}
+          <button className="rb-btn violet" style={{ flex: 2 }} disabled={!img || busy} onClick={identify}><Camera size={16} /> {busy ? "Identifying…" : "Identify"}</button>
+        </div>
+      </div>
+      {busy && <div className="rb-card" style={{ padding: 16, marginTop: 14 }}><div className="rb-typing"><i /><i /><i /></div></div>}
+      {result && <div className="rb-card" style={{ padding: 16, marginTop: 14, fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{result}</div>}
+    </div>
+  );
+}
+
+/* ---------------- DeepDive AI ---------------- */
+function DeepDive({ state, latest, issues }) {
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scroller = useRef(null);
+  useEffect(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; }, [msgs, busy]);
+
+  const snapshot = () => latest
+    ? PARAMS.map((p) => `${p.label}: ${latest[p.key]}${p.unit} (target ${p.ideal[0]}-${p.ideal[1]}, ${statusOf(p, latest[p.key])})`).join("; ")
+    : "No test results logged yet.";
+  const SYS = "You are Tidepool Reef DeepDive, a concise expert saltwater reef-aquarium advisor inside the Tidepool Reef app. Give practical, friendly, specific guidance. Keep answers short. If parameters are provided, focus on what's drifting and 2-3 concrete actions. Never recommend dangerous dosing.";
+
+  async function send(text, display) {
+    const history = [...msgs, { role: "user", content: display || text }];
+    setMsgs(history); setInput(""); setBusy(true);
+    try {
+      const apiMsgs = [...msgs.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: text }];
+      const reply = await askReefAI(apiMsgs, SYS);
+      setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
+    } catch (e) { setMsgs((m) => [...m, { role: "assistant", content: "I couldn't reach DeepDive right now. Try again in a moment." }]); }
+    setBusy(false);
+  }
+  const diagnose = () => {
+    const t = state.tank; const live = state.livestock.map((l) => l.name).join(", ");
+    send(`Diagnose my reef tank. Tank: ${t.model}, ${t.volume} gallons, set up ${t.since}. Current parameters — ${snapshot()}. Livestock: ${live}. Give a quick health read, flag what's drifting, and 2-3 concrete next actions.`,
+      "🔍 Diagnose my tank using current parameters");
+  };
+  return (
+    <div className="rb-fadein">
+      <div className="rb-ai-msgs" ref={scroller}>
+        {msgs.length === 0 && (
+          <div className="rb-empty"><Bot size={28} color="var(--aqua)" style={{ opacity: .85 }} />
+            <div style={{ marginTop: 10 }}>Ask anything about your reef, or run a full diagnosis from your latest test results.</div></div>
+        )}
+        {msgs.map((m, i) => <div key={i} className={"rb-ai-msg " + (m.role === "user" ? "u" : "a")}>{m.content}</div>)}
+        {busy && <div className="rb-ai-msg a"><div className="rb-typing"><i /><i /><i /></div></div>}
+      </div>
+      {msgs.length === 0 && (
+        <button className="rb-btn violet" style={{ width: "100%", marginBottom: 12, padding: 13 }} onClick={diagnose} disabled={busy}>
+          <TrendingUp size={16} /> Diagnose my tank{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
+        </button>
+      )}
+      <div className="rb-ai-row">
+        <input className="rb-input" placeholder="e.g. Why is my hammer receding?" value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && input.trim() && !busy) send(input.trim()); }} />
+        <button className="rb-btn" disabled={!input.trim() || busy} onClick={() => send(input.trim())}><Send size={16} /></button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- secondary screens ---------------- */
+function Notifications() {
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card" style={{ marginTop: 6 }}>
+        {NOTIFS.map((n) => (
+          <div key={n.id} className="rb-li">
+            <div className="rb-pa" style={{ background: `linear-gradient(140deg,${n.c},var(--violet))` }}>{n.who[0].toUpperCase()}</div>
+            <div><div className="nm"><b>@{n.who}</b> <span style={{ fontWeight: 400 }}>{n.txt}</span></div><div className="sub">{n.time} ago</div></div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function Messages() {
+  const convos = [
+    { u: "frag_fiend", last: "Still have the rainbow zoas? Could meet in Melbourne.", t: "1h", c: "#b06cff" },
+    { u: "torch_lord", last: "That gold torch is a beast — good luck with it!", t: "3h", c: "#ff7a5c" },
+    { u: "nano_nate", last: "Fusion 15 crew 🤝 what's your flow setup?", t: "1d", c: "#2ee6c8" },
+  ];
+  return (
+    <div className="rb-fadein"><div className="rb-card" style={{ marginTop: 6 }}>
+      {convos.map((c, i) => (
+        <div key={i} className="rb-li">
+          <div className="rb-pa" style={{ background: `linear-gradient(140deg,${c.c},var(--aqua-d))` }}>{c.u[0].toUpperCase()}</div>
+          <div style={{ flex: 1, minWidth: 0 }}><div className="nm">@{c.u}</div><div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.last}</div></div>
+          <div className="sub">{c.t}</div>
+        </div>
+      ))}
+    </div></div>
+  );
+}
+function Purchases() {
+  const orders = [
+    { t: "Gold Torch — 2 heads", s: "torch_lord", price: 120, status: "Shipped", c: "#ffc24d" },
+    { t: "AI Prime 16HD (used)", s: "reef_recycle", price: 180, status: "Delivered", c: "#3fe3ff" },
+  ];
+  return (
+    <div className="rb-fadein"><div className="rb-card" style={{ marginTop: 6 }}>
+      {orders.map((o, i) => (
+        <div key={i} className="rb-li">
+          <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${o.c},#0b2b3d)` }}><Receipt size={20} color="#04111a" /></div>
+          <div><div className="nm">{o.t}</div><div className="sub">@{o.s} · {o.status}</div></div>
+          <div style={{ marginLeft: "auto", fontFamily: "Bricolage Grotesque", fontWeight: 800, color: "var(--aqua)" }}>${o.price}</div>
+        </div>
+      ))}
+    </div></div>
+  );
+}
+function Seller({ state, openSell }) {
+  const mine = state.listings.filter((l) => l.seller === state.profile.handle);
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card rb-phero" style={{ padding: 20, marginTop: 6 }}>
+        <div className="glow" />
+        <div style={{ position: "relative" }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20 }}>Seller Hub</div>
+          <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>Sell frags & gear to the local reef community.</div>
+          <div className="rb-stats">
+            <div className="rb-stat"><div className="v">{mine.length}</div><div className="k">Active</div></div>
+            <div className="rb-stat"><div className="v">0</div><div className="k">Sold</div></div>
+            <div className="rb-stat"><div className="v">5.0</div><div className="k">Rating</div></div>
+          </div>
+        </div>
+      </div>
+      <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 13 }} onClick={openSell}><Tag size={16} /> List an item</button>
+      <div className="rb-h2"><Store size={16} color="var(--aqua)" /> Your listings</div>
+      <div className="rb-card">
+        {mine.length === 0 && <div className="rb-empty">No active listings yet. Tap “List an item” to post your first frag.</div>}
+        {mine.map((l) => (
+          <div key={l.id} className="rb-li">
+            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}><Tag size={18} color="#04111a" /></div>
+            <div><div className="nm">{l.title}</div><div className="sub">{l.cat}</div></div>
+            <div style={{ marginLeft: "auto", fontFamily: "Bricolage Grotesque", fontWeight: 800, color: "var(--aqua)" }}>${l.price}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+function SettingsView({ tank }) {
+  const rows = [
+    ["Tank", `${tank.name} · ${tank.model}`], ["Volume", `${tank.volume} gallons`],
+    ["Units", "Imperial (°F, gal)"], ["Parameter alerts", "On"], ["Push notifications", "On"], ["Theme", "Actinic (dark)"],
+  ];
+  return (
+    <div className="rb-fadein"><div className="rb-card" style={{ marginTop: 6 }}>
+      {rows.map(([k, v], i) => (
+        <div key={i} className="rb-li"><div className="nm">{k}</div><div style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>{v}</div></div>
+      ))}
+    </div>
+    <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+    <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef · concept build</div>
+    </div>
+  );
+}
+
+/* ---------------- sheets ---------------- */
+function LogSheet({ latest, onClose, onSave }) {
+  const [vals, setVals] = useState(() => {
+    const o = {}; PARAMS.forEach((p) => (o[p.key] = String(latest ? latest[p.key] : +((p.ideal[0] + p.ideal[1]) / 2).toFixed(p.dec)))); return o;
+  });
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Log test results</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        {PARAMS.map((p) => (
+          <div key={p.key} className="rb-num">
+            <label>{p.label} <span style={{ color: "var(--muted)" }}>{p.unit}</span></label>
+            <input type="number" inputMode="decimal" value={vals[p.key]} onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} />
+          </div>
+        ))}
+        <button className="rb-btn" style={{ width: "100%", marginTop: 8, padding: 14 }}
+          onClick={() => { const out = {}; PARAMS.forEach((p) => { const v = parseFloat(vals[p.key]); out[p.key] = Number.isFinite(v) ? v : (latest ? latest[p.key] : (p.ideal[0] + p.ideal[1]) / 2); }); onSave(out); onClose(); }}>
+          <Check size={17} /> Save reading <span style={{ opacity: .7 }}>· +5 Pearls</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+function SellSheet({ onClose, onSave }) {
+  const [title, setTitle] = useState(""); const [price, setPrice] = useState(""); const [cat, setCat] = useState("Coral");
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>List an item</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div className="rb-field"><label>Category</label>
+          <div className="rb-tabs" style={{ margin: 0 }}>{["Coral", "Fish", "Equipment"].map((c) => <div key={c} className={"rb-chip" + (cat === c ? " on" : "")} onClick={() => setCat(c)}>{c}</div>)}</div>
+        </div>
+        <div className="rb-field"><label>Title</label><input className="rb-input" placeholder="e.g. WYSIWYG Acan frag" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+        <div className="rb-field"><label>Price ($)</label><input className="rb-input" type="number" inputMode="decimal" placeholder="45" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
+        <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!title.trim() || !price}
+          onClick={() => { onSave({ cat, title: title.trim(), price: parseFloat(price) || 0 }); onClose(); }}>
+          <Tag size={16} /> Post listing <span style={{ opacity: .7 }}>· +3 Pearls</span>
+        </button>
+      </div>
+    </div>
+  );
+}
