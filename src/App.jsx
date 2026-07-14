@@ -33,7 +33,7 @@ const STYLES = `
     linear-gradient(180deg,var(--bg-1),var(--bg-0) 70%);}
 .rb-root:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;mix-blend-mode:overlay;z-index:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");}
-.rb-shell{max-width:480px;margin:0 auto;position:relative;z-index:1;padding:0 16px 120px;}
+.rb-shell{max-width:480px;margin:0 auto;position:relative;z-index:1;padding:0 16px calc(110px + env(safe-area-inset-bottom,0px));}
 .rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) both;}
 @keyframes rbUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
 
@@ -176,13 +176,15 @@ const STYLES = `
 .rb-btn.violet{background:linear-gradient(120deg,var(--violet),var(--aqua-d));color:#fff;}
 
 /* bottom nav */
-.rb-nav{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 28px));z-index:40;
-  display:flex;justify-content:space-around;padding:9px;border-radius:24px;background:var(--glass-2);border:1px solid var(--brd);
-  backdrop-filter:blur(20px);box-shadow:0 18px 50px -16px rgba(0,0,0,.85);}
-.rb-navi{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 0;border-radius:16px;
-  color:var(--muted-2);cursor:pointer;font-size:10.5px;font-weight:600;transition:.18s;}
+.rb-nav{position:fixed;bottom:0;left:0;right:0;width:100%;z-index:40;
+  display:flex;justify-content:space-around;align-items:stretch;
+  padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));
+  border-radius:0;background:var(--glass-2);border:none;border-top:1px solid var(--brd);
+  backdrop-filter:blur(20px);box-shadow:0 -10px 40px -16px rgba(0,0,0,.9);}
+.rb-navi{flex:1;max-width:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:9px 0;border-radius:14px;color:var(--muted-2);cursor:pointer;font-size:10.5px;font-weight:600;transition:.18s;}
 .rb-navi.on{color:var(--bg-0);background:linear-gradient(140deg,var(--aqua),var(--teal));box-shadow:0 0 22px -4px var(--aqua);}
-.rb-fab{position:fixed;bottom:92px;right:max(16px,calc(50% - 224px));width:56px;height:56px;border-radius:18px;z-index:41;
+.rb-fab{position:fixed;bottom:calc(84px + env(safe-area-inset-bottom,0px));right:max(16px,calc(50% - 224px));width:56px;height:56px;border-radius:18px;z-index:41;
   background:linear-gradient(140deg,var(--coral),var(--violet));border:none;color:#fff;display:grid;place-items:center;cursor:pointer;
   box-shadow:0 14px 34px -8px rgba(255,122,92,.6);}
 
@@ -253,7 +255,7 @@ const STYLES = `
 /* ---------- responsive: tablet & desktop ---------- */
 .rb-postgrid{display:block;}
 @media (min-width: 768px){
-  .rb-shell{max-width:768px;padding:0 24px 130px;}
+  .rb-shell{max-width:768px;padding:0 24px calc(120px + env(safe-area-inset-bottom,0px));}
   .rb-grid{grid-template-columns:repeat(4,1fr);}
   .rb-mgrid{grid-template-columns:repeat(3,1fr);}
   .rb-qcard{width:300px;}
@@ -446,15 +448,18 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, kr, counts] = await Promise.all([
+  const [children, mr, sr, allLikes, kr, counts] = await Promise.all([
     fetchTankChildren(active.id),
     supabase.from("listings").select("*, seller:profiles(handle)").eq("status", "active").order("created_at", { ascending: false }).limit(50),
-    supabase.from("posts").select("*, author:profiles(handle, display_name), post_likes(count)").order("created_at", { ascending: false }).limit(50),
+    supabase.from("posts").select("*, author:profiles(handle, display_name)").order("created_at", { ascending: false }).limit(50),
+    supabase.from("post_likes").select("post_id"),
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
     fetchSpeciesCounts(),
   ]);
   const liked = {};
   (kr.data || []).forEach((r) => (liked[r.post_id] = true));
+  const likeCounts = {};
+  (allLikes.data || []).forEach((r) => (likeCounts[r.post_id] = (likeCounts[r.post_id] || 0) + 1));
   return {
     uid,
     profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
@@ -472,7 +477,7 @@ async function fetchAll(uid) {
       id: r.id, user: (r.author && (r.author.display_name || r.author.handle)) || "reefer",
       handle: (r.author && r.author.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
       time: rel(r.created_at), body: r.body, img: null,
-      likes: (r.post_likes && r.post_likes[0] && r.post_likes[0].count) || 0, comments: 0,
+      likes: likeCounts[r.id] || 0, comments: 0,
     })),
     liked,
   };
@@ -995,16 +1000,9 @@ function Profile({ state, fish, corals, issues, go }) {
 /* ---------------- Feed ---------------- */
 function Feed({ allPosts, liked, toggleLike, addPost }) {
   const [draft, setDraft] = useState("");
-  const [q, setQ] = useState("");
   return (
     <div className="rb-fadein">
-      <div className="rb-searchrow">
-        <div className="rb-iconbtn sm"><MapPin size={17} color="var(--aqua)" /></div>
-        <div className="rb-searchpill"><Search size={16} color="var(--muted)" /><input placeholder="Search coral…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
-        <div className="rb-iconbtn sm"><SlidersHorizontal size={17} /></div>
-      </div>
-
-      <div className="rb-sec"><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
+      <div className="rb-sec" style={{ marginTop: 6 }}><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
       <div className="rb-card rb-compose">
         <CoralAvatar size={40} />
         <div style={{ flex: 1 }}>
