@@ -387,25 +387,43 @@ function rel(ts) {
   return Math.floor(s / 86400) + "d";
 }
 
+function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "" }; }
+
+async function fetchTankChildren(tankId) {
+  const [pr, lr, tr, gr] = await Promise.all([
+    supabase.from("parameters").select("*").eq("tank_id", tankId).order("measured_at"),
+    supabase.from("livestock").select("*").eq("tank_id", tankId).order("created_at"),
+    supabase.from("tasks").select("*").eq("tank_id", tankId),
+    supabase.from("tank_log").select("*").eq("tank_id", tankId).order("created_at", { ascending: false }),
+  ]);
+  return {
+    history: (pr.data || []).map((r) => ({
+      date: new Date(r.measured_at).getTime(),
+      alk: r.alk, cal: r.cal, mag: r.mag, no3: r.no3, po4: r.po4, ph: r.ph, sal: r.sal, temp: r.temp,
+    })),
+    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff" })),
+    tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
+    log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
+  };
+}
+
 async function fetchAll(uid) {
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", uid).single();
-  let { data: tanks } = await supabase.from("tanks").select("*").eq("owner_id", uid).order("created_at").limit(1);
-  let tank = tanks && tanks[0];
-  if (!tank) {
+  let { data: tanksAll } = await supabase.from("tanks").select("*").eq("owner_id", uid).order("created_at");
+  if (!tanksAll || !tanksAll.length) {
     const { data: created, error } = await supabase.from("tanks")
       .insert({ owner_id: uid, name: (profile && profile.display_name) || "My Reef", model: "IM NuVo Fusion 15", volume_gal: 15, since: "2025" })
       .select().single();
     if (error) throw error;
-    tank = created;
     await supabase.from("tasks").insert(DEFAULT_TASKS.map((t) => ({
-      tank_id: tank.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
+      tank_id: created.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
     })));
+    tanksAll = [created];
   }
-  const [pr, lr, tr, gr, mr, sr, kr] = await Promise.all([
-    supabase.from("parameters").select("*").eq("tank_id", tank.id).order("measured_at"),
-    supabase.from("livestock").select("*").eq("tank_id", tank.id).order("created_at"),
-    supabase.from("tasks").select("*").eq("tank_id", tank.id),
-    supabase.from("tank_log").select("*").eq("tank_id", tank.id).order("created_at", { ascending: false }),
+  let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
+  const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
+  const [children, mr, sr, kr] = await Promise.all([
+    fetchTankChildren(active.id),
     supabase.from("listings").select("*, seller:profiles(handle)").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*, author:profiles(handle, display_name), post_likes(count)").order("created_at", { ascending: false }).limit(50),
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
@@ -416,15 +434,10 @@ async function fetchAll(uid) {
     uid,
     profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
     pearls: (profile && profile.pearls) != null ? profile.pearls : 100,
-    tankId: tank.id,
-    tank: { name: tank.name, model: tank.model || "", volume: tank.volume_gal || 15, since: tank.since || "2025" },
-    history: (pr.data || []).map((r) => ({
-      date: new Date(r.measured_at).getTime(),
-      alk: r.alk, cal: r.cal, mag: r.mag, no3: r.no3, po4: r.po4, ph: r.ph, sal: r.sal, temp: r.temp,
-    })),
-    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff" })),
-    tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
-    log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
+    tanks: tanksAll.map(shapeTank),
+    tankId: active.id,
+    tank: shapeTank(active),
+    ...children,
     listings: (mr.data || []).map((r, i) => ({
       id: r.id, cat: r.category, title: r.title, price: Number(r.price_usd),
       loc: r.location || "", seller: (r.seller && r.seller.handle) || "reefer", g: PALETTE[i % PALETTE.length],
@@ -628,6 +641,12 @@ export default function TidepoolReef() {
     if (had) await supabase.from("post_likes").delete().eq("post_id", id).eq("profile_id", state.uid);
     else await supabase.from("post_likes").insert({ post_id: id, profile_id: state.uid });
   };
+  const switchTank = async (id) => {
+    if (id === state.tankId) return;
+    try { localStorage.setItem("tr:tank", id); } catch (e) {}
+    const children = await fetchTankChildren(id);
+    setState((s) => ({ ...s, tankId: id, tank: s.tanks.find((t) => t.id === id) || s.tank, ...children }));
+  };
 
   const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
     library: "Library", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
@@ -652,8 +671,8 @@ export default function TidepoolReef() {
         </div>
 
         {/* views */}
-        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet }} />}
-        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry }} />}
+        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
+        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
@@ -726,8 +745,22 @@ export default function TidepoolReef() {
   );
 }
 
+/* ---------------- Tank switcher ---------------- */
+function TankSwitcher({ tanks, tankId, switchTank }) {
+  if (!tanks || tanks.length < 2) return null;
+  return (
+    <div className="rb-tabs" style={{ marginTop: 4 }}>
+      {tanks.map((t) => (
+        <div key={t.id} className={"rb-chip" + (t.id === tankId ? " on" : "")} onClick={() => switchTank(t.id)}>
+          {t.name} <span style={{ opacity: .65, fontSize: 11 }}>· {t.volume}g</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ---------------- Tank (home) ---------------- */
-function TankHome({ state, latest, issues, go, setSheet }) {
+function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
   const t = state.tank;
   const health = latest
     ? Math.round((PARAMS.reduce((a, p) => a + (statusOf(p, latest[p.key]) === "good" ? 1 : statusOf(p, latest[p.key]) === "warn" ? 0.6 : 0.2), 0) / PARAMS.length) * 100)
@@ -736,6 +769,7 @@ function TankHome({ state, latest, issues, go, setSheet }) {
   const lastLog = state.log[0];
   return (
     <div className="rb-fadein">
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} />
       <div className="rb-tankhero" style={{ marginTop: 4, height: 190 }}>
         <div className="light" /><div className="rock" />
         <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
@@ -832,10 +866,11 @@ function TankHome({ state, latest, issues, go, setSheet }) {
 }
 
 /* ---------------- Log (parameters + journal + livestock) ---------------- */
-function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry }) {
+function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }) {
   const [tab, setTab] = useState("params");
   return (
     <div className="rb-fadein">
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} />
       <div className="rb-tabs" style={{ marginTop: 4 }}>
         {[["params", "Parameters"], ["journal", "Journal"], ["livestock", "Livestock"]].map(([k, lbl]) => (
           <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{lbl}</div>
@@ -867,7 +902,7 @@ function Profile({ state, fish, corals, issues, go }) {
           <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)" }}><Award size={12} /> Founding Reefer</span>
         </div>
         <div className="rb-stats">
-          <div className="rb-stat"><div className="v">1</div><div className="k">Tank</div></div>
+          <div className="rb-stat"><div className="v">{state.tanks.length}</div><div className="k">Tank{state.tanks.length !== 1 ? "s" : ""}</div></div>
           <div className="rb-stat"><div className="v">{fish}</div><div className="k">Fish</div></div>
           <div className="rb-stat"><div className="v">{corals}</div><div className="k">Corals</div></div>
         </div>
