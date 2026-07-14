@@ -34,8 +34,8 @@ const STYLES = `
 .rb-root:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;mix-blend-mode:overlay;z-index:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");}
 .rb-shell{max-width:480px;margin:0 auto;position:relative;z-index:1;padding:0 16px calc(110px + env(safe-area-inset-bottom,0px));}
-.rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) both;}
-@keyframes rbUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) forwards;}
+@keyframes rbUp{from{opacity:0;transform:translateY(14px)}99%{transform:translateY(0)}to{opacity:1;transform:none}}
 
 .rb-top{display:flex;align-items:center;gap:12px;padding:18px 2px 14px;position:sticky;top:0;z-index:30;}
 .rb-iconbtn{width:42px;height:42px;border-radius:14px;border:1px solid var(--brd);background:var(--glass);
@@ -198,8 +198,8 @@ const STYLES = `
   box-shadow:0 14px 34px -8px rgba(255,122,92,.6);}
 
 /* sheet */
-.rb-overlay{position:fixed;inset:0;z-index:60;background:rgba(2,10,16,.66);backdrop-filter:blur(4px);
-  display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;}
+.rb-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:rgba(2,10,16,.7);backdrop-filter:blur(4px);
+  display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;overflow-y:auto;overscroll-behavior:contain;}
 .rb-sheet{width:min(480px,100%);max-height:88vh;overflow-y:auto;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
   border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px;animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
 @keyframes rbSheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
@@ -272,7 +272,7 @@ const STYLES = `
   .rb-hscroll{padding:0 24px 6px;margin:0 -24px;}
   .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
   .rb-postgrid .rb-post{margin-bottom:0;}
-  .rb-overlay{align-items:center;padding:20px;}
+  .rb-overlay{align-items:center;padding:24px;}
   .rb-sheet{border-radius:26px;max-height:82vh;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
   .rb-cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
   .rb-cols2 > *{margin-top:0 !important;}
@@ -1110,6 +1110,7 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
   const [tankView, setTankView] = useState(null);
   const TAGS = ["Update", "Help", "Build", "Event"];
   return (
+    <>
     <div className="rb-fadein">
       <div className="rb-sec" style={{ marginTop: 6 }}><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
       <div className="rb-card rb-compose">
@@ -1162,13 +1163,14 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
 
       <CommunityQuestions posts={allPosts} onOpen={setOpen} />
       <RecentParameters onOpenTank={setTankView} />
+    </div>
 
       {open && (
         <PostSheet post={allPosts.find((p) => p.id === open.id) || open} liked={liked} toggleLike={toggleLike}
           addComment={addComment} uid={uid} onClose={() => setOpen(null)} />
       )}
       {tankView && <PublicTankSheet tankId={tankView} onClose={() => setTankView(null)} onMessage={() => {}} />}
-    </div>
+    </>
   );
 }
 
@@ -1719,6 +1721,7 @@ function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, s
   );
 
   return (
+    <>
     <div className="rb-fadein">
       <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} />
 
@@ -1757,6 +1760,8 @@ function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, s
       <Group title="Due today" items={soon} color="var(--warn)" />
       <Group title="Coming up" items={later} color="var(--aqua)" />
 
+    </div>
+
       {edit && (
         <TaskSheet task={edit === "new" ? null : edit}
           onClose={() => setEdit(null)}
@@ -1771,7 +1776,7 @@ function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, s
         <AIScheduleSheet state={state} latest={latest} onClose={() => setAiOpen(false)}
           onAdd={(name, every) => addTask(name, every, Date.now())} />
       )}
-    </div>
+    </>
   );
 }
 
