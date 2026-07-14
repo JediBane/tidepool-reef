@@ -158,7 +158,8 @@ const STYLES = `
 .rb-care span{font-size:10px;border:1px solid var(--brd);border-radius:8px;padding:2px 7px;color:var(--muted);}
 
 /* community */
-.rb-post{padding:16px;margin-bottom:14px;}
+.rb-post{padding:16px;margin-bottom:14px;display:flex;flex-direction:column;}
+.rb-post .rb-pbody{flex:1;}
 .rb-phead{display:flex;align-items:center;gap:11px;margin-bottom:12px;}
 .rb-pa{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:700;color:var(--bg-0);font-size:15px;flex:none;}
 .rb-phead .u{font-weight:700;font-size:14px}.rb-phead .meta{font-size:11.5px;color:var(--muted)}
@@ -168,7 +169,12 @@ const STYLES = `
 .rb-pacts{display:flex;gap:20px;margin-top:6px;color:var(--muted);font-size:13px;}
 .rb-pacts span{display:flex;align-items:center;gap:6px;cursor:pointer;}
 .rb-pacts .liked{color:var(--coral);}
-.rb-compose{padding:14px;display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;}
+.rb-compose{padding:14px;margin-bottom:14px;}
+.rb-compose-top{display:flex;gap:10px;align-items:flex-start;}
+.rb-compose-top .rb-input{flex:1;min-width:0;}
+.rb-compose-bar{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.rb-compose-bar .rb-chip{flex:none;}
+.rb-compose-bar .rb-btn{margin-left:auto;}
 
 /* inputs */
 .rb-input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:12px;color:var(--text);
@@ -267,7 +273,7 @@ const STYLES = `
   .rb-qcard{width:300px;}
   .rb-tcard{width:220px;}
   .rb-hscroll{padding:0 24px 6px;margin:0 -24px;}
-  .rb-postgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+  .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
   .rb-postgrid .rb-post{margin-bottom:0;}
   .rb-overlay{align-items:center;padding:20px;}
   .rb-sheet{border-radius:26px;max-height:82vh;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
@@ -280,7 +286,7 @@ const STYLES = `
 @media (min-width: 1100px){
   .rb-shell{max-width:1080px;}
   .rb-mgrid{grid-template-columns:repeat(4,1fr);}
-  .rb-postgrid{grid-template-columns:repeat(3,1fr);}
+  .rb-postgrid{grid-template-columns:repeat(3,minmax(0,1fr));}
   .rb-qcard{width:320px;}
   .rb-cols2.wide-40-60{grid-template-columns:2fr 3fr;}
   .rb-fab{right:max(16px,calc(50% - 524px));}
@@ -1092,17 +1098,17 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
   return (
     <div className="rb-fadein">
       <div className="rb-sec" style={{ marginTop: 6 }}><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
-      <div className="rb-card rb-compose" style={{ flexDirection: "column", gap: 0 }}>
-        <div style={{ display: "flex", gap: 10, width: "100%" }}>
+      <div className="rb-card rb-compose">
+        <div className="rb-compose-top">
           <CoralAvatar size={40} />
           <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…"
             value={draft} onChange={(e) => setDraft(e.target.value)} />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, width: "100%", flexWrap: "wrap" }}>
+        <div className="rb-compose-bar">
           {TAGS.map((t) => (
             <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>{t}</div>
           ))}
-          <button className="rb-btn" style={{ marginLeft: "auto" }} disabled={!draft.trim()}
+          <button className="rb-btn" disabled={!draft.trim()}
             onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
             <Send size={15} /> Post
           </button>
