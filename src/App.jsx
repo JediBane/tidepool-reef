@@ -6,7 +6,7 @@ import {
   Menu, X, Bell, Waves, Droplets, Fish, Shell, Store, Newspaper, BookOpen, ListChecks,
   FlaskConical, Notebook, Camera, Bot, MessageCircle, Receipt, Settings, MapPin, Heart,
   ChevronRight, ChevronLeft, Check, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
-  Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, SlidersHorizontal,
+  Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, Users, SlidersHorizontal,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
@@ -379,6 +379,40 @@ function rel(ts) {
 
 function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "" }; }
 
+async function fetchSpeciesCounts() {
+  const { data } = await supabase.rpc("species_counts");
+  const out = {};
+  (data || []).forEach((r) => (out[r.species_id] = Number(r.keepers)));
+  return out;
+}
+async function fetchKeepers(sid) {
+  const { data } = await supabase.rpc("species_keepers", { sid });
+  return data || [];
+}
+async function fetchPublicTank(tankId) {
+  const [{ data: tank }, { data: stock }] = await Promise.all([
+    supabase.from("tanks").select("*, owner:profiles(handle, display_name, location, reefing_since, badges)").eq("id", tankId).single(),
+    supabase.from("livestock").select("*").eq("tank_id", tankId).order("kind"),
+  ]);
+  return { tank, stock: stock || [] };
+}
+async function fetchThreads(uid) {
+  const { data } = await supabase.from("messages")
+    .select("*, sender:profiles!messages_sender_id_fkey(handle), recipient:profiles!messages_recipient_id_fkey(handle)")
+    .or(`sender_id.eq.${uid},recipient_id.eq.${uid}`)
+    .order("created_at", { ascending: false }).limit(200);
+  const threads = {};
+  (data || []).forEach((m) => {
+    const other = m.sender_id === uid ? m.recipient_id : m.sender_id;
+    const handle = m.sender_id === uid ? (m.recipient && m.recipient.handle) : (m.sender && m.sender.handle);
+    if (!threads[other]) threads[other] = { id: other, handle: handle || "reefer", msgs: [] };
+    threads[other].msgs.push(m);
+  });
+  Object.values(threads).forEach((t) => t.msgs.reverse());
+  return Object.values(threads).sort((a, b) =>
+    new Date(b.msgs[b.msgs.length - 1].created_at) - new Date(a.msgs[a.msgs.length - 1].created_at));
+}
+
 async function fetchTankChildren(tankId) {
   const [pr, lr, tr, gr] = await Promise.all([
     supabase.from("parameters").select("*").eq("tank_id", tankId).order("measured_at"),
@@ -391,7 +425,7 @@ async function fetchTankChildren(tankId) {
       date: new Date(r.measured_at).getTime(),
       alk: r.alk, cal: r.cal, mag: r.mag, no3: r.no3, po4: r.po4, ph: r.ph, sal: r.sal, temp: r.temp,
     })),
-    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff" })),
+    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff", species_id: r.species_id })),
     tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
     log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
   };
@@ -412,11 +446,12 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, kr] = await Promise.all([
+  const [children, mr, sr, kr, counts] = await Promise.all([
     fetchTankChildren(active.id),
     supabase.from("listings").select("*, seller:profiles(handle)").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*, author:profiles(handle, display_name), post_likes(count)").order("created_at", { ascending: false }).limit(50),
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
+    fetchSpeciesCounts(),
   ]);
   const liked = {};
   (kr.data || []).forEach((r) => (liked[r.post_id] = true));
@@ -425,6 +460,7 @@ async function fetchAll(uid) {
     profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
     pearls: (profile && profile.pearls) != null ? profile.pearls : 100,
     tanks: tanksAll.map(shapeTank),
+    speciesCounts: counts || {},
     tankId: active.id,
     tank: shapeTank(active),
     ...children,
@@ -555,6 +591,8 @@ export default function TidepoolReef() {
   const [libCat, setLibCat] = useState("All");
   const [sheet, setSheet] = useState(null);        // log|sell|libDetail
   const [libItem, setLibItem] = useState(null);
+  const [publicTank, setPublicTank] = useState(null);
+  const [msgTo, setMsgTo] = useState(null);
   const [toast, setToast] = useState(0);
 
   const [session, setSession] = useState(undefined); // undefined=checking, null=signed out
@@ -608,10 +646,14 @@ export default function TidepoolReef() {
     await supabase.from("tank_log").insert({ tank_id: state.tankId, entry_type: type, note });
     award(5);
   };
-  const addLivestock = async (kind, name, note) => {
+  const addLivestock = async (kind, name, note, speciesId) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
-    setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: note || "", c }] }));
-    await supabase.from("livestock").insert({ tank_id: state.tankId, kind, name, note: note || null, color: c });
+    setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: note || "", c, species_id: speciesId || null }] }));
+    await supabase.from("livestock").insert({ tank_id: state.tankId, kind, name, note: note || null, color: c, species_id: speciesId || null });
+    if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (s.livestock.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
+  };
+  const sendMessage = async (toId, body, speciesId) => {
+    await supabase.from("messages").insert({ sender_id: state.uid, recipient_id: toId, body, species_id: speciesId || null });
   };
   const addListing = async (l) => {
     const loc = state.profile.location || "Florida, United States";
@@ -666,12 +708,12 @@ export default function TidepoolReef() {
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
-        {view === "library" && <Library {...{ libCat, setLibCat, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
+        {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
         {view === "tasks" && <Tasks {...{ state, completeTask }} />}
         {view === "reefid" && <ReefID />}
         {view === "notifications" && <Notifications />}
-        {view === "messages" && <Messages />}
+        {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
         {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell") }} />}
         {view === "settings" && <SettingsView tank={state.tank} />}
@@ -728,7 +770,19 @@ export default function TidepoolReef() {
       {/* sheets */}
       {sheet === "log" && <LogSheet latest={latest} onClose={() => setSheet(null)} onSave={saveLog} />}
       {sheet === "sell" && <SellSheet onClose={() => setSheet(null)} onSave={addListing} />}
-      {sheet === "libDetail" && libItem && <LibDetail item={libItem} onClose={() => setSheet(null)} />}
+      {sheet === "libDetail" && libItem && (
+        <LibDetail item={libItem} uid={state.uid} count={state.speciesCounts[libItem.id] || 0}
+          onClose={() => setSheet(null)}
+          onOpenTank={(tid) => { setPublicTank(tid); setSheet("publicTank"); }}
+          onMessage={(who) => { setMsgTo({ ...who, species: libItem }); setSheet("message"); }} />
+      )}
+      {sheet === "publicTank" && publicTank && (
+        <PublicTankSheet tankId={publicTank} onClose={() => setSheet(libItem ? "libDetail" : null)}
+          onMessage={(who) => { setMsgTo({ ...who, species: libItem }); setSheet("message"); }} />
+      )}
+      {sheet === "message" && msgTo && (
+        <MessageSheet to={msgTo} onClose={() => setSheet(libItem ? "libDetail" : null)} onSend={sendMessage} />
+      )}
 
       {toast > 0 && <div className="rb-toast"><span className="rb-pearl" />+{toast} Pearls</div>}
     </div>
@@ -1044,7 +1098,7 @@ function SpeciesPhoto({ item, height, radius = 0 }) {
 
 const CAT_COLOR = { Fish: "#ff7a5c", SPS: "#2ee6c8", LPS: "#3fe3ff", Soft: "#b06cff", Invert: "#ffc24d", Pest: "#ff5d72" };
 
-function Library({ libCat, setLibCat, openItem }) {
+function Library({ libCat, setLibCat, openItem, counts }) {
   const [q, setQ] = useState("");
   const query = q.trim().toLowerCase();
   const shown = REEFPEDIA.filter((l) =>
@@ -1082,6 +1136,11 @@ function Library({ libCat, setLibCat, openItem }) {
                 <span style={{ color: diffColor[l.diff] || "var(--bad)", borderColor: (diffColor[l.diff] || "#ff5d72") + "66" }}>
                   {l.diff === "Pest" ? "Pest" : l.diff}
                 </span>
+                {counts && counts[l.id] > 0 && (
+                  <span style={{ color: "var(--aqua)", borderColor: "var(--brd-2)" }}>
+                    <Users size={9} style={{ verticalAlign: -1, marginRight: 3 }} />{counts[l.id]}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -1102,7 +1161,14 @@ function PhotoCredit({ item }) {
   );
 }
 
-function LibDetail({ item, onClose }) {
+function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage }) {
+  const [keepers, setKeepers] = useState(null);
+  useEffect(() => {
+    let alive = true;
+    if (item.cat === "Pest") { setKeepers([]); return; }
+    fetchKeepers(item.id).then((k) => { if (alive) setKeepers(k); });
+    return () => { alive = false; };
+  }, [item.id]);
   const [tips, setTips] = useState("");
   const [busy, setBusy] = useState(false);
   const isPest = item.cat === "Pest";
@@ -1146,11 +1212,186 @@ function LibDetail({ item, onClose }) {
             </div>
           ))}
         </div>
+        {item.cat !== "Pest" && (
+          <>
+            <div className="rb-h2" style={{ marginTop: 4, marginBottom: 10 }}>
+              <Users size={15} color="var(--aqua)" /> Who keeps this
+              <small>{keepers === null ? "…" : keepers.length ? `${keepers.length} in the community` : "be the first"}</small>
+            </div>
+            <div className="rb-card" style={{ marginBottom: 14 }}>
+              {keepers === null && <div className="rb-empty" style={{ padding: 18 }}>Looking…</div>}
+              {keepers !== null && keepers.length === 0 && (
+                <div className="rb-empty" style={{ padding: 18 }}>Nobody's logged this one yet. Add it to your tank and you'll be the first.</div>
+              )}
+              {(keepers || []).map((k, i) => (
+                <div key={i} className="rb-li" style={{ gap: 11 }}>
+                  <div className="rb-pa" style={{ background: `linear-gradient(140deg,${CAT_COLOR[item.cat]},var(--violet))`, width: 38, height: 38 }}>
+                    {(k.handle || "?")[0].toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="nm">
+                      @{k.handle}
+                      {k.profile_id === uid && <span style={{ color: "var(--aqua)", fontSize: 11, marginLeft: 6 }}>you</span>}
+                    </div>
+                    <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {k.tank_name} · {k.tank_volume}g{k.item_note ? " · " + k.item_note : ""}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <div className="rb-iconbtn" style={{ width: 34, height: 34, borderRadius: 10 }}
+                      title="View tank" onClick={() => onOpenTank(k.tank_id)}>
+                      <Waves size={15} />
+                    </div>
+                    {k.profile_id !== uid && (
+                      <div className="rb-iconbtn" style={{ width: 34, height: 34, borderRadius: 10 }}
+                        title="Message" onClick={() => onMessage({ id: k.profile_id, handle: k.handle })}>
+                        <MessageCircle size={15} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
         {tips && <div className="rb-card" style={{ padding: 14, marginBottom: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
         <button className="rb-btn violet" style={{ width: "100%", padding: 13 }} onClick={getTips} disabled={busy}>
           <Bot size={16} /> {busy ? "Asking DeepDive…" : isPest ? "Get an eradication plan" : "Care tips from DeepDive"}
         </button>
         <PhotoCredit item={item} />
+      </div>
+    </div>
+  );
+}
+
+
+/* ---------------- Public tank view ---------------- */
+function PublicTankSheet({ tankId, onClose, onMessage }) {
+  const [data, setData] = useState(null);
+  useEffect(() => { let alive = true; fetchPublicTank(tankId).then((d) => { if (alive) setData(d); }); return () => { alive = false; }; }, [tankId]);
+  const t = data && data.tank;
+  const owner = t && t.owner;
+  const groups = ["Coral", "Fish", "Invert"];
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b>{t ? t.name : "Loading…"}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+        {!data && <div className="rb-empty">Loading tank…</div>}
+        {t && (
+          <>
+            <div className="rb-tankhero" style={{ height: 150, marginTop: 0 }}>
+              <div className="light" /><div className="rock" />
+              <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 14, height: 20, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
+              <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 18, height: 12, background: "#3ce0a3" }} />
+              <div style={{ position: "absolute", left: 14, bottom: 12 }}>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>{t.name}</div>
+                <div style={{ color: "var(--muted)", fontSize: 12 }}>{t.model} · {t.volume_gal} gal · since {t.since}</div>
+              </div>
+            </div>
+            <div className="rb-li" style={{ padding: "14px 0" }}>
+              <div className="rb-pa" style={{ background: "linear-gradient(140deg,var(--aqua),var(--violet))" }}>
+                {(owner && owner.handle ? owner.handle[0] : "?").toUpperCase()}
+              </div>
+              <div>
+                <div className="nm">@{owner && owner.handle}</div>
+                <div className="sub">{owner && owner.location}{owner && owner.reefing_since ? ` · reefing since ${owner.reefing_since}` : ""}</div>
+              </div>
+              <button className="rb-btn ghost" style={{ marginLeft: "auto", padding: "9px 13px" }}
+                onClick={() => onMessage({ id: t.owner_id, handle: owner && owner.handle })}>
+                <MessageCircle size={15} /> Message
+              </button>
+            </div>
+            {groups.map((g) => {
+              const items = data.stock.filter((s) => s.kind === g);
+              if (!items.length) return null;
+              return (
+                <div key={g}>
+                  <div className="rb-h2" style={{ marginTop: 14, marginBottom: 8 }}>
+                    {g === "Fish" ? <Fish size={15} color="var(--coral)" /> : g === "Invert" ? <Shell size={15} color="var(--gold)" /> : <Waves size={15} color="var(--teal)" />}
+                    {g === "Invert" ? "Inverts" : g + "s"} <small>{items.length}</small>
+                  </div>
+                  <div className="rb-card">
+                    {items.map((s) => (
+                      <div key={s.id} className="rb-li">
+                        <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${s.color || "#3fe3ff"},#0b2b3d)`, width: 38, height: 38 }}>
+                          {g === "Fish" ? <Fish size={17} color="#04111a" /> : g === "Invert" ? <Shell size={17} color="#04111a" /> : <Waves size={17} color="#04111a" />}
+                        </div>
+                        <div><div className="nm">{s.name}</div>{s.note && <div className="sub">{s.note}</div>}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11, marginTop: 14 }}>
+              Water parameters stay private to the tank's owner.
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Message composer ---------------- */
+function MessageSheet({ to, onClose, onSend }) {
+  const sp = to.species;
+  const quick = sp ? [
+    `Awesome ${sp.name}! 🔥`,
+    `How long have you kept your ${sp.name}?`,
+    `Any tips for keeping ${sp.name} happy?`,
+    `What are you feeding your ${sp.name}?`,
+  ] : ["Hey! 👋"];
+  const [body, setBody] = useState("");
+  const [sent, setSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const send = async () => {
+    if (!body.trim()) return;
+    setBusy(true);
+    try { await onSend(to.id, body.trim(), sp ? sp.id : null); setSent(true); }
+    catch (e) { /* surfaced below */ }
+    setBusy(false);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b>Message @{to.handle}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+        {sent ? (
+          <div className="rb-empty" style={{ padding: "36px 20px" }}>
+            <Check size={30} color="var(--good)" />
+            <div style={{ marginTop: 12, color: "var(--text)", fontWeight: 600 }}>Sent to @{to.handle}</div>
+            <div style={{ marginTop: 6 }}>Find their reply in Messages.</div>
+            <button className="rb-btn" style={{ marginTop: 16, padding: "11px 20px" }} onClick={onClose}>Done</button>
+          </div>
+        ) : (
+          <>
+            {sp && (
+              <div className="rb-card" style={{ display: "flex", gap: 11, padding: 11, marginBottom: 14, alignItems: "center" }}>
+                <div style={{ width: 46, height: 46, borderRadius: 11, overflow: "hidden", flex: "none" }}>
+                  <SpeciesPhoto item={sp} height={46} radius={11} />
+                </div>
+                <div><div style={{ fontSize: 12, color: "var(--muted)" }}>About their</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{sp.name}</div></div>
+              </div>
+            )}
+            <div className="rb-tabs" style={{ margin: "0 0 12px", flexWrap: "wrap" }}>
+              {quick.map((q, i) => (
+                <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => setBody(q)}>{q}</div>
+              ))}
+            </div>
+            <textarea className="rb-input" rows={4} placeholder="Say something nice, or ask for advice…"
+              value={body} onChange={(e) => setBody(e.target.value)} />
+            <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 13 }} disabled={!body.trim() || busy} onClick={send}>
+              <Send size={16} /> {busy ? "Sending…" : "Send message"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1212,6 +1453,13 @@ function Tasks({ state, completeTask }) {
 function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, livestockOnly }) {
   const [lsName, setLsName] = useState("");
   const [lsKind, setLsKind] = useState("Coral");
+  const [pick, setPick] = useState(null);
+  const KIND_CATS = { Coral: ["SPS", "LPS", "Soft"], Fish: ["Fish"], Invert: ["Invert"] };
+  const q = lsName.trim().toLowerCase();
+  const matches = q.length < 2 ? [] : REEFPEDIA
+    .filter((r) => KIND_CATS[lsKind].includes(r.cat) &&
+      (r.name.toLowerCase().includes(q) || r.sci.toLowerCase().includes(q)))
+    .slice(0, 5);
   const p = PARAMS.find((x) => x.key === sel);
   const chartData = state.history.map((h) => ({ date: h.date, v: h[sel] }));
   const prev = state.history.length > 1 ? state.history[state.history.length - 2][sel] : latest ? latest[sel] : 0;
@@ -1265,14 +1513,30 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
       <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{state.livestock.length} in tank</small></div>
       <div className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
         <div className="rb-tabs" style={{ margin: "0 0 10px" }}>
-          {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (lsKind === k ? " on" : "")} onClick={() => setLsKind(k)}>{k}</div>)}
+          {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (lsKind === k ? " on" : "")} onClick={() => { setLsKind(k); setPick(null); }}>{k}</div>)}
         </div>
         <div style={{ display: "flex", gap: 9 }}>
           <input className="rb-input" placeholder={lsKind === "Fish" ? "e.g. Royal Gramma" : lsKind === "Invert" ? "e.g. Cleaner Shrimp" : "e.g. Gold Hammer"} value={lsName}
-            onChange={(e) => setLsName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && lsName.trim()) { addLivestock(lsKind, lsName.trim()); setLsName(""); } }} />
-          <button className="rb-btn" disabled={!lsName.trim()} onClick={() => { addLivestock(lsKind, lsName.trim()); setLsName(""); }}><Plus size={16} /></button>
+            onChange={(e) => { setLsName(e.target.value); setPick(null); }} />
+          <button className="rb-btn" disabled={!lsName.trim()} onClick={() => { addLivestock(lsKind, lsName.trim(), null, pick && pick.id); setLsName(""); setPick(null); }}><Plus size={16} /></button>
         </div>
+        {pick ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12.5, color: "var(--muted)" }}>
+            <Check size={14} color="var(--good)" /> Linked to <b style={{ color: "var(--text)" }}>{pick.name}</b> in Reefpedia
+            <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--muted-2)" }} onClick={() => setPick(null)}>clear</span>
+          </div>
+        ) : matches.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>Link to a species so other reefers can find you:</div>
+            <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+              {matches.map((m) => (
+                <div key={m.id} className="rb-chip" style={{ fontSize: 12 }} onClick={() => { setPick(m); if (!lsName.trim()) setLsName(m.name); }}>
+                  {m.name}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="rb-card">
         {state.livestock.length === 0 && <div className="rb-empty">Nothing in the tank yet — add your first coral, fish, or invert above.</div>}
@@ -1472,24 +1736,80 @@ function Notifications() {
     </div>
   );
 }
-function Messages() {
-  const convos = [
-    { u: "frag_fiend", last: "Still have the rainbow zoas? Could meet in Melbourne.", t: "1h", c: "#b06cff" },
-    { u: "torch_lord", last: "That gold torch is a beast — good luck with it!", t: "3h", c: "#ff7a5c" },
-    { u: "nano_nate", last: "Fusion 15 crew 🤝 what's your flow setup?", t: "1d", c: "#2ee6c8" },
-  ];
-  return (
-    <div className="rb-fadein"><div className="rb-card" style={{ marginTop: 6 }}>
-      {convos.map((c, i) => (
-        <div key={i} className="rb-li">
-          <div className="rb-pa" style={{ background: `linear-gradient(140deg,${c.c},var(--aqua-d))` }}>{c.u[0].toUpperCase()}</div>
-          <div style={{ flex: 1, minWidth: 0 }}><div className="nm">@{c.u}</div><div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.last}</div></div>
-          <div className="sub">{c.t}</div>
+function Messages({ state, sendMessage }) {
+  const [threads, setThreads] = useState(null);
+  const [open, setOpen] = useState(null);
+  const [reply, setReply] = useState("");
+  const load = () => fetchThreads(state.uid).then(setThreads);
+  useEffect(() => { load(); }, [state.uid]);
+
+  const send = async () => {
+    if (!reply.trim() || !open) return;
+    const body = reply.trim();
+    setReply("");
+    await sendMessage(open.id, body, null);
+    const fresh = await fetchThreads(state.uid);
+    setThreads(fresh);
+    setOpen(fresh.find((t) => t.id === open.id) || open);
+  };
+
+  if (open) {
+    return (
+      <div className="rb-fadein">
+        <div className="rb-li" style={{ padding: "4px 0 14px" }}>
+          <div className="rb-iconbtn" onClick={() => setOpen(null)}><ChevronLeft size={18} /></div>
+          <div className="rb-pa" style={{ background: "linear-gradient(140deg,var(--aqua),var(--violet))", marginLeft: 4 }}>
+            {open.handle[0].toUpperCase()}
+          </div>
+          <div className="nm">@{open.handle}</div>
         </div>
-      ))}
-    </div></div>
+        <div className="rb-ai-msgs">
+          {open.msgs.map((m) => (
+            <div key={m.id} className={"rb-ai-msg " + (m.sender_id === state.uid ? "u" : "a")}>{m.body}</div>
+          ))}
+        </div>
+        <div className="rb-ai-row">
+          <input className="rb-input" placeholder="Reply…" value={reply}
+            onChange={(e) => setReply(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
+          <button className="rb-btn" disabled={!reply.trim()} onClick={send}><Send size={16} /></button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="rb-fadein">
+      {threads === null && <div className="rb-card rb-empty" style={{ marginTop: 6 }}>Loading…</div>}
+      {threads !== null && threads.length === 0 && (
+        <div className="rb-card rb-empty" style={{ marginTop: 6, padding: "34px 20px" }}>
+          <MessageCircle size={26} color="var(--aqua)" style={{ opacity: .8 }} />
+          <div style={{ marginTop: 10, color: "var(--text)", fontWeight: 600 }}>No messages yet</div>
+          <div style={{ marginTop: 6 }}>Browse Reefpedia, find someone who keeps a coral you love, and say hi.</div>
+        </div>
+      )}
+      <div className="rb-card" style={{ marginTop: 6 }}>
+        {(threads || []).map((t) => {
+          const last = t.msgs[t.msgs.length - 1];
+          return (
+            <div key={t.id} className="rb-li" style={{ cursor: "pointer" }} onClick={() => setOpen(t)}>
+              <div className="rb-pa" style={{ background: "linear-gradient(140deg,var(--aqua),var(--violet))" }}>
+                {t.handle[0].toUpperCase()}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="nm">@{t.handle}</div>
+                <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {last.sender_id === state.uid ? "You: " : ""}{last.body}
+                </div>
+              </div>
+              <div className="sub">{rel(last.created_at)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
+
 function Purchases() {
   const orders = [
     { t: "Gold Torch — 2 heads", s: "torch_lord", price: 120, status: "Shipped", c: "#ffc24d" },
