@@ -378,7 +378,7 @@ function rel(ts) {
   return Math.floor(s / 86400) + "d";
 }
 
-function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "" }; }
+function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "", isPublic: t.is_public !== false, shareParams: !!t.share_params }; }
 
 async function fetchSpeciesCounts() {
   const { data } = await supabase.rpc("species_counts");
@@ -403,6 +403,12 @@ async function fetchPublicTank(tankId) {
   }
   return { tank: tank ? { ...tank, owner } : null, stock: stock || [] };
 }
+async function fetchRecentParams() {
+  const { data, error } = await supabase.rpc("recent_parameters_feed", { lim: 12 });
+  if (error) console.error("[tidepool] recent params failed:", error.message);
+  return data || [];
+}
+
 async function fetchComments(postId) {
   const [{ data, error }, { data: pf }] = await Promise.all([
     supabase.from("post_comments").select("*").eq("post_id", postId).order("created_at"),
@@ -762,6 +768,16 @@ export default function TidepoolReef() {
     award(2);
     return { ...data, handle: state.profile.handle };
   };
+  const setTankSharing = async (id, field, value) => {
+    const col = field === "params" ? "share_params" : "is_public";
+    setState((s) => ({
+      ...s,
+      tanks: s.tanks.map((t) => (t.id === id ? { ...t, [field === "params" ? "shareParams" : "isPublic"]: value } : t)),
+      tank: s.tank.id === id ? { ...s.tank, [field === "params" ? "shareParams" : "isPublic"]: value } : s.tank,
+    }));
+    const { error } = await supabase.from("tanks").update({ [col]: value }).eq("id", id);
+    if (error) console.error("[tidepool] sharing update failed:", error.message);
+  };
   const switchTank = async (id) => {
     if (id === state.tankId) return;
     try { localStorage.setItem("tr:tank", id); } catch (e) {}
@@ -805,7 +821,7 @@ export default function TidepoolReef() {
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
         {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell") }} />}
-        {view === "settings" && <SettingsView tank={state.tank} />}
+        {view === "settings" && <SettingsView {...{ state, setTankSharing }} />}
       </div>
 
       {/* contextual FAB */}
@@ -1091,6 +1107,7 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
   const [draft, setDraft] = useState("");
   const [tag, setTag] = useState("Update");
   const [open, setOpen] = useState(null);
+  const [tankView, setTankView] = useState(null);
   const TAGS = ["Update", "Help", "Build", "Event"];
   return (
     <div className="rb-fadein">
@@ -1143,11 +1160,84 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
         })}
       </div>
 
+      <CommunityQuestions posts={allPosts} onOpen={setOpen} />
+      <RecentParameters onOpenTank={setTankView} />
+
       {open && (
         <PostSheet post={allPosts.find((p) => p.id === open.id) || open} liked={liked} toggleLike={toggleLike}
           addComment={addComment} uid={uid} onClose={() => setOpen(null)} />
       )}
+      {tankView && <PublicTankSheet tankId={tankView} onClose={() => setTankView(null)} onMessage={() => {}} />}
     </div>
+  );
+}
+
+/* Community Questions — real posts tagged "Help" */
+function CommunityQuestions({ posts, onOpen }) {
+  const qs = posts.filter((p) => p.tag === "Help");
+  if (!qs.length) return null;
+  return (
+    <>
+      <div className="rb-sec"><h3>Community Questions</h3><p>Share your knowledge and help fellow reefers</p></div>
+      <div className="rb-hscroll">
+        {qs.map((q) => (
+          <div key={q.id} className="rb-card rb-qcard" style={{ cursor: "pointer" }} onClick={() => onOpen(q)}>
+            <div className="rb-phead">
+              <div className="rb-pa" style={{ background: `linear-gradient(140deg,${q.tagc},var(--violet))` }}>{q.user[0]}</div>
+              <div><div className="u">{q.user}</div></div>
+              <span style={{ marginLeft: "auto", fontSize: 12, color: "var(--muted)" }}>{q.time}</span>
+            </div>
+            <div className="rb-pbody rb-clamp">{q.body}</div>
+            <div className="rb-pacts" style={{ marginTop: 10 }}>
+              <span><Heart size={15} /> {q.likes}</span>
+              <span><MessageCircle size={15} /> {q.comments}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* Recent Parameters — real readings from tanks whose owners opted in */
+function RecentParameters({ onOpenTank }) {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { let alive = true; fetchRecentParams().then((r) => { if (alive) setRows(r); }); return () => { alive = false; }; }, []);
+  if (rows !== null && rows.length === 0) return null;
+  const chip = (label, val, key) => {
+    const p = PARAMS.find((x) => x.key === key);
+    const st = p && val != null ? statusOf(p, Number(val)) : "warn";
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+        <span className={"rb-sdot " + sclass[st]} style={{ width: 6, height: 6 }} />
+        <span style={{ fontSize: 11, color: "var(--muted)" }}>{label}</span>
+        <span style={{ fontSize: 12, fontWeight: 700 }}>{val == null ? "—" : val}</span>
+      </div>
+    );
+  };
+  return (
+    <>
+      <div className="rb-sec"><h3>Recent Parameters</h3><p>Latest updates from the community</p></div>
+      <div className="rb-hscroll">
+        {rows === null && <div className="rb-card rb-qcard rb-empty">Loading…</div>}
+        {(rows || []).map((r) => (
+          <div key={r.tank_id} className="rb-card" style={{ flex: "none", width: 210, padding: 14, cursor: "pointer", scrollSnapAlign: "start" }}
+            onClick={() => onOpenTank(r.tank_id)}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+              <b style={{ fontFamily: "Bricolage Grotesque", fontSize: 15 }}>{r.tank_name}</b>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>{rel(r.measured_at)}</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>@{r.handle} · {r.tank_volume}g</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 10px", marginTop: 12 }}>
+              {chip("Alk", r.alk, "alk")}
+              {chip("Ca", r.cal, "cal")}
+              {chip("NO₃", r.no3, "no3")}
+              {chip("pH", r.ph, "ph")}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -1486,7 +1576,7 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
               );
             })}
             <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11, marginTop: 14 }}>
-              Water parameters stay private to the tank's owner.
+              Test results are only shared if the owner opts in.
             </div>
           </>
         )}
@@ -2245,19 +2335,57 @@ function Seller({ state, openSell }) {
     </div>
   );
 }
-function SettingsView({ tank }) {
-  const rows = [
-    ["Tank", `${tank.name} · ${tank.model}`], ["Volume", `${tank.volume} gallons`],
-    ["Units", "Imperial (°F, gal)"], ["Parameter alerts", "On"], ["Push notifications", "On"], ["Theme", "Actinic (dark)"],
-  ];
-  return (
-    <div className="rb-fadein"><div className="rb-card" style={{ marginTop: 6 }}>
-      {rows.map(([k, v], i) => (
-        <div key={i} className="rb-li"><div className="nm">{k}</div><div style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>{v}</div></div>
-      ))}
+function SettingsView({ state, setTankSharing }) {
+  const Toggle = ({ on, onChange }) => (
+    <div onClick={() => onChange(!on)} style={{
+      width: 46, height: 27, borderRadius: 14, flex: "none", cursor: "pointer", position: "relative",
+      background: on ? "linear-gradient(120deg,var(--aqua),var(--teal))" : "rgba(255,255,255,.12)",
+      transition: ".2s", border: "1px solid " + (on ? "transparent" : "var(--brd)"),
+    }}>
+      <div style={{
+        position: "absolute", top: 2, left: on ? 21 : 2, width: 21, height: 21, borderRadius: "50%",
+        background: on ? "#04111a" : "var(--muted)", transition: ".2s",
+      }} />
     </div>
-    <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
-    <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef · concept build</div>
+  );
+  return (
+    <div className="rb-fadein">
+      <div className="rb-h2" style={{ marginTop: 6 }}><Users size={16} color="var(--aqua)" /> Community sharing</div>
+      <div className="rb-card" style={{ padding: "4px 14px" }}>
+        {state.tanks.map((t, i) => (
+          <div key={t.id} style={{ padding: "14px 0", borderBottom: i < state.tanks.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
+            <div style={{ fontWeight: 700, fontSize: 14.5 }}>{t.name}</div>
+            <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{t.model} · {t.volume} gal</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Show tank & livestock</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+                  Lets other reefers find you in Reefpedia as a keeper.
+                </div>
+              </div>
+              <Toggle on={t.isPublic} onChange={(v) => setTankSharing(t.id, "public", v)} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>Share test results</div>
+                <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2, lineHeight: 1.4 }}>
+                  Posts your latest readings to the community "Recent Parameters" feed. Off by default.
+                </div>
+              </div>
+              <Toggle on={t.shareParams} onChange={(v) => setTankSharing(t.id, "params", v)} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-h2"><Settings size={16} color="var(--muted)" /> App</div>
+      <div className="rb-card">
+        {[["Units", "Imperial (°F, gal)"], ["Theme", "Actinic (dark)"], ["Signed in as", "@" + state.profile.handle]].map(([k, v], i) => (
+          <div key={i} className="rb-li"><div className="nm">{k}</div><div style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>{v}</div></div>
+        ))}
+      </div>
+      <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+      <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef</div>
     </div>
   );
 }
