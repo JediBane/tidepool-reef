@@ -169,12 +169,9 @@ const STYLES = `
 .rb-pacts{display:flex;gap:20px;margin-top:6px;color:var(--muted);font-size:13px;}
 .rb-pacts span{display:flex;align-items:center;gap:6px;cursor:pointer;}
 .rb-pacts .liked{color:var(--coral);}
-.rb-compose{padding:14px;margin-bottom:14px;}
-.rb-compose-top{display:flex;gap:10px;align-items:flex-start;}
-.rb-compose-top .rb-input{flex:1;min-width:0;}
-.rb-compose-bar{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap;}
+.rb-compose{padding:14px;display:flex;gap:10px;align-items:flex-start;margin-bottom:14px;}
+.rb-compose-bar{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:flex-end;}
 .rb-compose-bar .rb-chip{flex:none;}
-.rb-compose-bar .rb-btn{margin-left:auto;}
 
 /* inputs */
 .rb-input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:12px;color:var(--text);
@@ -1099,19 +1096,19 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
     <div className="rb-fadein">
       <div className="rb-sec" style={{ marginTop: 6 }}><h3>My Feed</h3><p>Posts from you and reefers you follow</p></div>
       <div className="rb-card rb-compose">
-        <div className="rb-compose-top">
-          <CoralAvatar size={40} />
+        <CoralAvatar size={40} />
+        <div style={{ flex: 1, minWidth: 0 }}>
           <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…"
             value={draft} onChange={(e) => setDraft(e.target.value)} />
-        </div>
-        <div className="rb-compose-bar">
-          {TAGS.map((t) => (
-            <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>{t}</div>
-          ))}
-          <button className="rb-btn" disabled={!draft.trim()}
-            onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
-            <Send size={15} /> Post
-          </button>
+          <div className="rb-compose-bar">
+            {draft.trim() && TAGS.map((t) => (
+              <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>{t}</div>
+            ))}
+            <button className="rb-btn" disabled={!draft.trim()}
+              onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
+              <Send size={15} /> Post
+            </button>
+          </div>
         </div>
       </div>
 
