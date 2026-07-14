@@ -9,6 +9,7 @@ import {
   Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, SlidersHorizontal,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
+import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
 
 /* ======================================================================= */
 /*  Styles — "Actinic": a reef tank at night under blue LED                 */
@@ -304,18 +305,6 @@ const SEED_LISTINGS = [
   { id: "s8", cat: "Coral", title: "Acan Lord — 4 polyp", price: 75, loc: "Rockledge, FL", seller: "acan_acres", g: ["#b06cff", "#ff5d72"] },
 ];
 
-const LIBRARY = [
-  { id: "l1", cat: "Coral", name: "Hammer Coral", sci: "Euphyllia ancora", diff: "Easy", light: "Low–Med", flow: "Low–Med", g: ["#ffc24d", "#ff7a5c"], blurb: "A beginner-friendly LPS with flowing, hammer-shaped tentacles. Great movement and very forgiving of parameter swings." },
-  { id: "l2", cat: "Coral", name: "Zoanthids", sci: "Zoanthus sp.", diff: "Easy", light: "Med", flow: "Low–Med", g: ["#ff7a5c", "#b06cff"], blurb: "Colorful colonial polyps that come in endless morphs. Hardy and fast-spreading — a classic first coral." },
-  { id: "l3", cat: "Coral", name: "Duncan Coral", sci: "Duncanopsammia axifuga", diff: "Easy", light: "Low–Med", flow: "Low", g: ["#3fe3ff", "#2ee6c8"], blurb: "Polyp extension all day and eager to eat. Multiplies readily when fed and kept stable." },
-  { id: "l4", cat: "Coral", name: "Acanthastrea", sci: "Acanthastrea lordhowensis", diff: "Medium", light: "Low–Med", flow: "Low", g: ["#b06cff", "#ff5d72"], blurb: "Prized for intense rainbow coloration. Loves to be fed and rewards stable nutrients." },
-  { id: "l5", cat: "Fish", name: "Ocellaris Clownfish", sci: "Amphiprion ocellaris", diff: "Easy", light: "—", flow: "—", g: ["#ff7a5c", "#ffc24d"], blurb: "The iconic reef fish. Hardy, personable, tank-bred widely available. Often hosts in anemones or LPS." },
-  { id: "l6", cat: "Fish", name: "Royal Gramma", sci: "Gramma loreto", diff: "Easy", light: "—", flow: "—", g: ["#b06cff", "#ffc24d"], blurb: "Purple-to-gold stunner that's peaceful and reef safe. Likes caves and rockwork to dart between." },
-  { id: "l7", cat: "Fish", name: "Yellow Watchman Goby", sci: "Cryptocentrus cinctus", diff: "Easy", light: "—", flow: "—", g: ["#ffc24d", "#3ce0a3"], blurb: "Charismatic bottom-dweller that pairs with pistol shrimp. Reef safe and full of personality." },
-  { id: "l8", cat: "Invert", name: "Skunk Cleaner Shrimp", sci: "Lysmata amboinensis", diff: "Easy", light: "—", flow: "—", g: ["#ff9d8a", "#ffc24d"], blurb: "Active cleaner that sets up stations and picks parasites off fish. Reef safe and entertaining." },
-  { id: "l9", cat: "Invert", name: "Trochus Snail", sci: "Trochus sp.", diff: "Easy", light: "—", flow: "—", g: ["#84a8ba", "#3ce0a3"], blurb: "Workhorse algae grazer that can flip itself upright. Backbone of a nano cleanup crew." },
-  { id: "l10", cat: "Coral", name: "Green Star Polyps", sci: "Pachyclavularia sp.", diff: "Easy", light: "Med", flow: "Med", g: ["#3ce0a3", "#2ee6c8"], blurb: "Vivid green mat-forming soft coral. Bulletproof but spreads fast — keep it on its own island of rock." },
-];
 
 const SEED_POSTS = [
   { id: "p1", user: "ReefMatt", handle: "saltlife_matt", tag: "Update", tagc: "#2ee6c8", time: "2h", body: "Two weeks of color-up on this Jason Fox chalice. Dialed alk down to 8.2 and held it rock steady — patience pays.", img: ["#ff7a5c", "#b06cff"], likes: 42, comments: 8 },
@@ -649,7 +638,7 @@ export default function TidepoolReef() {
   };
 
   const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
-    library: "Library", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
+    library: "Reefpedia", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
     notifications: "Notifications", messages: "Messages", purchases: "Purchases", seller: "Seller Hub", settings: "Settings" };
   const isTab = ["tank", "log", "deepdive", "community", "profile"].includes(view);
   const taskCount = state.tasks.filter((t) => t.due - Date.now() < dayMs).length;
@@ -715,7 +704,7 @@ export default function TidepoolReef() {
             </div>
             <div className="rb-mdiv" />
             {[
-              ["library", BookOpen, "Species Library"],
+              ["library", BookOpen, "Reefpedia"],
               ["shop", Store, "Shop"],
               ["tasks", ListChecks, "Maintenance Tasks", taskCount > 0 ? String(taskCount) : null],
               ["reefid", Camera, "Reef ID", "dot"],
@@ -1020,33 +1009,113 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
   );
 }
 
-/* ---------------- Library ---------------- */
+/* ---------------- Reefpedia ---------------- */
+// Free species photos from Wikipedia's public API (CORS-open, no key, freely licensed).
+const wikiCache = {};
+async function fetchWikiSummaryImage(title) {
+  const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+  if (!r.ok) return null;
+  const d = await r.json();
+  if (d.type === "disambiguation") return null;
+  return (d.originalimage && d.originalimage.source) || (d.thumbnail && d.thumbnail.source) || null;
+}
+async function resolveWikiImage(title, sci) {
+  // 1) direct title
+  try { const hit = await fetchWikiSummaryImage(title); if (hit) return hit; } catch (e) {}
+  // 2) fall back to a Wikipedia search on the scientific name, then take the best match
+  try {
+    const r = await fetch(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(sci || title)}&limit=3`);
+    if (r.ok) {
+      const d = await r.json();
+      for (const page of d.pages || []) {
+        if (page.thumbnail && page.thumbnail.url) {
+          const u = page.thumbnail.url;
+          return (u.startsWith("//") ? "https:" + u : u).replace(/\/\d+px-/, "/640px-");
+        }
+        const hit = await fetchWikiSummaryImage(page.key);
+        if (hit) return hit;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+function useWikiImage(title, sci) {
+  const [url, setUrl] = useState(() => (title in wikiCache ? wikiCache[title] : undefined));
+  useEffect(() => {
+    let alive = true;
+    if (!title) return;
+    if (title in wikiCache) { setUrl(wikiCache[title]); return; }
+    resolveWikiImage(title, sci).then((src) => {
+      wikiCache[title] = src;
+      if (alive) setUrl(src);
+    });
+    return () => { alive = false; };
+  }, [title, sci]);
+  return url; // undefined = loading, null = none, string = photo
+}
+
+function SpeciesIcon({ cat, size = 30 }) {
+  if (cat === "Fish") return <Fish size={size} />;
+  if (cat === "Invert") return <Shell size={size} />;
+  if (cat === "Pest") return <Bell size={size} />;
+  return <Waves size={size} />;
+}
+
+function WikiPhoto({ item, height, radius = 0 }) {
+  const url = useWikiImage(item.wiki, item.sci);
+  return (
+    <div style={{
+      height, borderRadius: radius, position: "relative", overflow: "hidden",
+      background: `linear-gradient(140deg,${item.g[0]},${item.g[1]})`,
+      display: "grid", placeItems: "center", color: "rgba(4,17,26,.5)",
+    }}>
+      {url && <img src={url} alt={item.name} loading="lazy"
+        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
+      {!url && <SpeciesIcon cat={item.cat} size={height > 140 ? 40 : 30} />}
+    </div>
+  );
+}
+
+const CAT_COLOR = { Fish: "#ff7a5c", SPS: "#2ee6c8", LPS: "#3fe3ff", Soft: "#b06cff", Invert: "#ffc24d", Pest: "#ff5d72" };
+
 function Library({ libCat, setLibCat, openItem }) {
   const [q, setQ] = useState("");
-  const cats = ["All", "Coral", "Fish", "Invert"];
-  const shown = LIBRARY.filter((l) => (libCat === "All" || l.cat === libCat) && (l.name.toLowerCase().includes(q.toLowerCase()) || l.sci.toLowerCase().includes(q.toLowerCase())));
+  const query = q.trim().toLowerCase();
+  const shown = REEFPEDIA.filter((l) =>
+    (libCat === "All" || l.cat === libCat) &&
+    (!query || l.name.toLowerCase().includes(query) || l.sci.toLowerCase().includes(query) || l.blurb.toLowerCase().includes(query)));
   return (
     <div className="rb-fadein">
       <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
         <Search size={17} color="var(--muted)" />
-        <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }} placeholder="Search corals, fish, inverts…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }}
+          placeholder="Search 76 species, corals & pests…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <div className="rb-tabs" style={{ marginTop: 14 }}>
-        {cats.map((c) => <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => setLibCat(c)}>{c}</div>)}
+        {REEFPEDIA_CATS.map((c) => (
+          <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => setLibCat(c)}>
+            {c === "Pest" ? "Pests & Disease" : c === "Soft" ? "Soft Coral" : c}
+          </div>
+        ))}
       </div>
+      {shown.length === 0 && <div className="rb-card rb-empty">Nothing matches “{q}”. Try a common name, a genus, or a symptom.</div>}
       <div className="rb-mgrid">
         {shown.map((l) => (
           <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
-            <div className="rb-mimg" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}>
-              <span className="cat">{l.cat}</span>
-              {l.cat === "Fish" ? <Fish size={30} /> : l.cat === "Invert" ? <Shell size={30} /> : <Waves size={30} />}
+            <div style={{ position: "relative" }}>
+              <WikiPhoto item={l} height={120} />
+              <span className="cat" style={{ position: "absolute", top: 8, left: 8, fontSize: 10, background: "rgba(3,8,12,.72)",
+                padding: "3px 8px", borderRadius: 20, backdropFilter: "blur(6px)", border: `1px solid ${CAT_COLOR[l.cat]}66`, color: CAT_COLOR[l.cat] }}>
+                {l.cat}
+              </span>
             </div>
             <div className="rb-mbody">
               <div className="t">{l.name}</div>
               <div className="sci">{l.sci}</div>
               <div className="rb-care">
-                <span style={{ color: diffColor[l.diff], borderColor: diffColor[l.diff] + "66" }}>{l.diff}</span>
-                {l.light !== "—" && <span>☀ {l.light}</span>}
+                <span style={{ color: diffColor[l.diff] || "var(--bad)", borderColor: (diffColor[l.diff] || "#ff5d72") + "66" }}>
+                  {l.diff === "Pest" ? "Pest" : l.diff}
+                </span>
               </div>
             </div>
           </div>
@@ -1059,35 +1128,52 @@ function Library({ libCat, setLibCat, openItem }) {
 function LibDetail({ item, onClose }) {
   const [tips, setTips] = useState("");
   const [busy, setBusy] = useState(false);
+  const isPest = item.cat === "Pest";
   const getTips = async () => {
     setBusy(true);
     try {
-      const r = await askReefAI(
-        [{ role: "user", content: `Give 3 concise, practical care tips for keeping ${item.name} (${item.sci}) in a 15-gallon nano reef. Bullet points, one line each.` }],
-        "You are Reef AI, an expert reef-aquarium advisor. Be concise and specific."
-      );
+      const prompt = isPest
+        ? `I think I have ${item.name} (${item.sci}) in my reef tank. Give me a short, practical eradication plan — 3-4 steps, most effective first, plus one thing NOT to do.`
+        : `Give 4 concise, practical care tips for keeping ${item.name} (${item.sci}) in a home reef aquarium. Bullet points, one line each.`;
+      const r = await askReefAI([{ role: "user", content: prompt }],
+        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Be concise, specific, and practical.");
       setTips(r || "Couldn't load tips right now.");
-    } catch (e) { setTips("Couldn't reach DeepDive right now."); }
+    } catch (e) { setTips("DeepDive error: " + (e.message || "connection failed")); }
     setBusy(false);
   };
   return (
     <div className="rb-overlay" onClick={onClose}>
       <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
-        <div className="rb-sheet-h"><b>{item.name}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
-        <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${item.g[0]},${item.g[1]})`, height: 150 }}>
-          {item.cat === "Fish" ? <Fish size={40} /> : item.cat === "Invert" ? <Shell size={40} /> : <Waves size={40} />}
+        <div className="rb-sheet-h">
+          <b>{item.name}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
         </div>
-        <div style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13, marginBottom: 10 }}>{item.sci} · {item.cat}</div>
-        <div className="rb-care" style={{ marginBottom: 12 }}>
-          <span style={{ color: diffColor[item.diff], borderColor: diffColor[item.diff] + "66" }}>Care: {item.diff}</span>
-          {item.light !== "—" && <span>Light: {item.light}</span>}
-          {item.flow !== "—" && <span>Flow: {item.flow}</span>}
+        <WikiPhoto item={item} height={190} radius={14} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 14px", flexWrap: "wrap" }}>
+          <span style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13 }}>{item.sci}</span>
+          <span className="rb-badge" style={{ background: CAT_COLOR[item.cat] + "22", color: CAT_COLOR[item.cat], border: `1px solid ${CAT_COLOR[item.cat]}55`, fontSize: 11 }}>
+            {item.cat}
+          </span>
+          <span className="rb-badge" style={{ background: (diffColor[item.diff] || "#ff5d72") + "22", color: diffColor[item.diff] || "#ff5d72",
+            border: `1px solid ${(diffColor[item.diff] || "#ff5d72")}55`, fontSize: 11 }}>
+            {isPest ? "Pest / Disease" : item.diff + " care"}
+          </span>
         </div>
-        <div style={{ fontSize: 14, lineHeight: 1.55, color: "#d8eef5" }}>{item.blurb}</div>
-        {tips && <div className="rb-card" style={{ padding: 14, marginTop: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
-        <button className="rb-btn violet" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={getTips} disabled={busy}>
-          <Bot size={16} /> {busy ? "Asking DeepDive…" : "Care tips from DeepDive"}
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: "#d8eef5", marginBottom: 14 }}>{item.blurb}</div>
+        <div className="rb-card" style={{ padding: "4px 14px", marginBottom: 14 }}>
+          {item.facts.map(([k, v], i) => (
+            <div key={i} style={{ display: "flex", gap: 12, padding: "10px 0",
+              borderBottom: i < item.facts.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
+              <span style={{ fontSize: 12.5, color: "var(--muted)", minWidth: 108 }}>{k}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 600, flex: 1 }}>{v}</span>
+            </div>
+          ))}
+        </div>
+        {tips && <div className="rb-card" style={{ padding: 14, marginBottom: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
+        <button className="rb-btn violet" style={{ width: "100%", padding: 13 }} onClick={getTips} disabled={busy}>
+          <Bot size={16} /> {busy ? "Asking DeepDive…" : isPest ? "Get an eradication plan" : "Care tips from DeepDive"}
         </button>
+        <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11, marginTop: 12 }}>Photo via Wikipedia</div>
       </div>
     </div>
   );
