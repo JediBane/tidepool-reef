@@ -9,10 +9,10 @@ export default async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const key = process.env.ANTHROPIC_API_KEY;
+  const key = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_KEY;
   if (!key) {
     return Response.json(
-      { error: { message: "Server missing ANTHROPIC_API_KEY. Set it in Netlify → Site settings → Environment variables." } },
+      { error: { message: "Server missing ANTHROPIC_API_KEY (or ANTHROPIC_KEY). Set it in Netlify → Site settings → Environment variables." } },
       { status: 500 }
     );
   }
