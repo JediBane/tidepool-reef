@@ -353,7 +353,9 @@ function dueLabel(due) {
   if (diff < 2 * dayMs) return { t: "Due tomorrow", c: "due-soon" };
   return { t: "Due " + fmtDate(due), c: "due-ok" };
 }
-const everyMs = { "Every 2 days": 2 * dayMs, Weekly: 7 * dayMs, Biweekly: 14 * dayMs, Monthly: 30 * dayMs };
+const everyMs = { Daily: dayMs, "Every 2 days": 2 * dayMs, "Every 3 days": 3 * dayMs, Weekly: 7 * dayMs,
+  Biweekly: 14 * dayMs, Monthly: 30 * dayMs, Quarterly: 90 * dayMs, "One-time": 0 };
+const EVERY_OPTS = ["Daily", "Every 2 days", "Every 3 days", "Weekly", "Biweekly", "Monthly", "Quarterly", "One-time"];
 const diffColor = { Easy: "#3ce0a3", Medium: "#ffc24d", Hard: "#ff5d72" };
 
 /* ---------------- Supabase ---------------- */
@@ -636,10 +638,31 @@ export default function TidepoolReef() {
   /* actions — optimistic local update, then persist to Supabase */
   const completeTask = async (id) => {
     const t = state.tasks.find((x) => x.id === id); if (!t) return;
+    if (t.every === "One-time") {   // one-time tasks disappear when done
+      setState((s) => ({ ...s, tasks: s.tasks.filter((x) => x.id !== id) }));
+      await supabase.from("tasks").delete().eq("id", id);
+      award(2);
+      return;
+    }
     const due = Date.now() + (everyMs[t.every] || 7 * dayMs);
     setState((s) => ({ ...s, tasks: s.tasks.map((x) => (x.id === id ? { ...x, due } : x)) }));
     await supabase.from("tasks").update({ due_at: new Date(due).toISOString() }).eq("id", id);
     award(2);
+  };
+  const addTask = async (name, every, dueAt) => {
+    const due = dueAt || Date.now();
+    const { data } = await supabase.from("tasks")
+      .insert({ tank_id: state.tankId, name, every, due_at: new Date(due).toISOString() })
+      .select().single();
+    setState((s) => ({ ...s, tasks: [...s.tasks, { id: (data && data.id) || "tmp" + Date.now(), name, every, due }] }));
+  };
+  const updateTask = async (id, name, every, due) => {
+    setState((s) => ({ ...s, tasks: s.tasks.map((x) => (x.id === id ? { ...x, name, every, due } : x)) }));
+    await supabase.from("tasks").update({ name, every, due_at: new Date(due).toISOString() }).eq("id", id);
+  };
+  const deleteTask = async (id) => {
+    setState((s) => ({ ...s, tasks: s.tasks.filter((x) => x.id !== id) }));
+    await supabase.from("tasks").delete().eq("id", id);
   };
   const saveLog = async (vals) => {
     setState((s) => ({ ...s, history: [...s.history, { date: Date.now(), ...vals }] }));
@@ -715,7 +738,7 @@ export default function TidepoolReef() {
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
-        {view === "tasks" && <Tasks {...{ state, completeTask }} />}
+        {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
         {view === "reefid" && <ReefID />}
         {view === "notifications" && <Notifications />}
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
@@ -884,8 +907,13 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
 
       <div className="rb-cols2">
         <div>
-          <div className="rb-h2"><Calendar size={16} color="var(--aqua)" /> Up next <small onClick={() => go("tasks")} style={{ cursor: "pointer" }}>all tasks ›</small></div>
+          <div className="rb-h2"><Calendar size={16} color="var(--aqua)" /> Up next <small onClick={() => go("tasks")} style={{ cursor: "pointer", color: "var(--aqua)" }}>manage tasks ›</small></div>
           <div className="rb-card">
+            {nextTasks.length === 0 && (
+              <div className="rb-empty" style={{ padding: 20 }}>
+                No tasks yet — <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => go("tasks")}>build a schedule</span> or let DeepDive suggest one.
+              </div>
+            )}
             {nextTasks.map((tk) => {
               const d = dueLabel(tk.due);
               return (
@@ -1423,25 +1451,233 @@ function Shop({ allListings, cat, setCat }) {
 }
 
 /* ---------------- Tasks ---------------- */
-function Tasks({ state, completeTask }) {
-  return (
-    <div className="rb-fadein">
-      <div className="rb-h2" style={{ marginTop: 6 }}><ListChecks size={16} color="var(--coral)" /> Maintenance <small>tap to complete · +2 Pearls</small></div>
+function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }) {
+  const [edit, setEdit] = useState(null);      // task being edited, or "new"
+  const [aiOpen, setAiOpen] = useState(false);
+
+  const sorted = [...state.tasks].sort((a, b) => a.due - b.due);
+  const overdue = sorted.filter((t) => t.due - Date.now() < -dayMs / 2);
+  const soon = sorted.filter((t) => { const d = t.due - Date.now(); return d >= -dayMs / 2 && d < 2 * dayMs; });
+  const later = sorted.filter((t) => t.due - Date.now() >= 2 * dayMs);
+
+  const Group = ({ title, items, color }) => items.length === 0 ? null : (
+    <>
+      <div className="rb-h2"><ListChecks size={16} color={color} /> {title} <small>{items.length}</small></div>
       <div className="rb-card">
-        {[...state.tasks].sort((a, b) => a.due - b.due).map((t) => {
+        {items.map((t) => {
           const d = dueLabel(t.due);
           return (
-            <div key={t.id} className="rb-task" onClick={() => completeTask(t.id)}>
-              <div className="rb-check"><Check size={15} style={{ opacity: 0 }} /></div>
-              <div><div className="nm">{t.name}</div><div className={"when " + d.c}>{d.t}</div></div>
-              <span className="rb-pill">{t.every}</span>
+            <div key={t.id} className="rb-task" style={{ cursor: "default" }}>
+              <div className="rb-check" onClick={() => completeTask(t.id)} style={{ cursor: "pointer" }} title="Complete">
+                <Check size={15} style={{ opacity: 0 }} />
+              </div>
+              <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEdit(t)}>
+                <div className="nm">{t.name}</div>
+                <div className={"when " + d.c}>{d.t} · {t.every}</div>
+              </div>
+              <div className="rb-iconbtn" style={{ width: 32, height: 32, borderRadius: 10 }} onClick={() => setEdit(t)} title="Edit">
+                <PenSquare size={14} />
+              </div>
             </div>
           );
         })}
       </div>
-      <div className="rb-h2"><Calendar size={16} color="var(--aqua)" /> This week</div>
-      <div className="rb-card" style={{ padding: 16, fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6 }}>
-        Stay on a weekly rhythm: test → 2-gal water change → dose to target. Completing tasks earns Pearls you can spend in the Shop.
+    </>
+  );
+
+  return (
+    <div className="rb-fadein">
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} />
+
+      <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+        <button className="rb-btn" style={{ flex: 1, padding: 13 }} onClick={() => setEdit("new")}>
+          <Plus size={16} /> New task
+        </button>
+        <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={() => setAiOpen(true)}>
+          <Bot size={16} /> AI schedule help
+        </button>
+      </div>
+
+      <div style={{ fontSize: 12, color: "var(--muted)", margin: "12px 2px 0", textAlign: "center" }}>
+        Tap the circle to complete · tap the task to edit · +2 Pearls each
+      </div>
+
+      {state.tasks.length === 0 && (
+        <div className="rb-card rb-empty" style={{ marginTop: 14, padding: "34px 20px" }}>
+          <ListChecks size={28} color="var(--aqua)" style={{ opacity: .85 }} />
+          <div style={{ marginTop: 10, fontWeight: 600, color: "var(--text)" }}>No tasks yet</div>
+          <div style={{ marginTop: 6 }}>Build your own schedule, or let DeepDive suggest one based on this tank's parameters and livestock.</div>
+        </div>
+      )}
+
+      <Group title="Overdue" items={overdue} color="var(--bad)" />
+      <Group title="Due now" items={soon} color="var(--warn)" />
+      <Group title="Coming up" items={later} color="var(--aqua)" />
+
+      {edit && (
+        <TaskSheet task={edit === "new" ? null : edit}
+          onClose={() => setEdit(null)}
+          onSave={(name, every, due) => {
+            if (edit === "new") addTask(name, every, due);
+            else updateTask(edit.id, name, every, due);
+            setEdit(null);
+          }}
+          onDelete={edit === "new" ? null : () => { deleteTask(edit.id); setEdit(null); }} />
+      )}
+      {aiOpen && (
+        <AIScheduleSheet state={state} latest={latest} onClose={() => setAiOpen(false)}
+          onAdd={(name, every) => addTask(name, every, Date.now())} />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Task editor ---------------- */
+function TaskSheet({ task, onClose, onSave, onDelete }) {
+  const [name, setName] = useState(task ? task.name : "");
+  const [every, setEvery] = useState(task ? task.every : "Weekly");
+  const [when, setWhen] = useState(() => {
+    const d = new Date(task ? task.due : Date.now());
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    return d.toISOString().slice(0, 10);
+  });
+  const [confirmDel, setConfirmDel] = useState(false);
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b>{task ? "Edit task" : "New task"}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+        <div className="rb-field">
+          <label>Task</label>
+          <input className="rb-input" placeholder="e.g. Water change (5 gal)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </div>
+        <div className="rb-field">
+          <label>Repeats</label>
+          <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+            {EVERY_OPTS.map((o) => (
+              <div key={o} className={"rb-chip" + (every === o ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setEvery(o)}>{o}</div>
+            ))}
+          </div>
+        </div>
+        <div className="rb-field">
+          <label>Next due</label>
+          <input className="rb-input" type="date" value={when} onChange={(e) => setWhen(e.target.value)} />
+        </div>
+        <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!name.trim()}
+          onClick={() => onSave(name.trim(), every, new Date(when + "T09:00").getTime())}>
+          <Check size={16} /> {task ? "Save changes" : "Add task"}
+        </button>
+        {onDelete && (
+          confirmDel ? (
+            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+              <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => setConfirmDel(false)}>Cancel</button>
+              <button className="rb-btn" style={{ flex: 1, background: "var(--bad)", color: "#fff" }} onClick={onDelete}>Delete for good</button>
+            </div>
+          ) : (
+            <button className="rb-btn ghost" style={{ width: "100%", marginTop: 10, color: "var(--bad)", borderColor: "rgba(255,93,114,.4)" }}
+              onClick={() => setConfirmDel(true)}>Delete task</button>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- AI schedule builder ---------------- */
+function AIScheduleSheet({ state, latest, onClose, onAdd }) {
+  const [busy, setBusy] = useState(false);
+  const [suggestions, setSuggestions] = useState(null);
+  const [added, setAdded] = useState({});
+  const [err, setErr] = useState("");
+  const t = state.tank;
+
+  const ask = async () => {
+    setBusy(true); setErr("");
+    const params = latest
+      ? PARAMS.map((p) => `${p.label} ${latest[p.key]}${p.unit} (${statusOf(p, latest[p.key])})`).join(", ")
+      : "no test results logged yet";
+    const stock = state.livestock.length
+      ? state.livestock.map((l) => `${l.name} (${l.type})`).join(", ") : "nothing logged yet";
+    const current = state.tasks.length
+      ? state.tasks.map((x) => `${x.name} — ${x.every}`).join("; ") : "no tasks yet";
+    const prompt =
+      `Build a maintenance schedule for this reef tank.\n` +
+      `Tank: ${t.name} — ${t.model}, ${t.volume} gallons, running since ${t.since}.\n` +
+      `Latest parameters: ${params}.\n` +
+      `Livestock: ${stock}.\n` +
+      `Tasks they already have: ${current}.\n\n` +
+      `Suggest 5-8 maintenance tasks tailored to THIS tank — consider its size, what lives in it, and especially any ` +
+      `parameters that are drifting (address those directly). Don't duplicate tasks they already have; suggest what's MISSING.\n` +
+      `Reply with ONLY a JSON array, no markdown, no preamble:\n` +
+      `[{"name":"Water change (5 gal)","every":"Weekly","why":"one short sentence explaining why THIS tank needs it"}]\n` +
+      `The "every" field must be exactly one of: ${EVERY_OPTS.join(", ")}.`;
+    try {
+      const raw = await askReefAI([{ role: "user", content: prompt }],
+        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Reply with valid JSON only — no markdown fences, no commentary.");
+      const clean = raw.replace(/```json|```/g, "").trim();
+      const jsonStart = clean.indexOf("[");
+      const parsed = JSON.parse(clean.slice(jsonStart, clean.lastIndexOf("]") + 1));
+      setSuggestions(parsed.filter((s) => s && s.name && EVERY_OPTS.includes(s.every)));
+    } catch (e) {
+      setErr("DeepDive couldn't build a schedule just now — try again.");
+    }
+    setBusy(false);
+  };
+
+  useEffect(() => { ask(); }, []);
+
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b style={{ display: "flex", alignItems: "center", gap: 8 }}><Bot size={18} color="var(--aqua)" /> Schedule for {t.name}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+
+        {busy && (
+          <div className="rb-empty" style={{ padding: "34px 20px" }}>
+            <div className="rb-typing" style={{ justifyContent: "center" }}><i /><i /><i /></div>
+            <div style={{ marginTop: 12 }}>Reading this tank's parameters and livestock…</div>
+          </div>
+        )}
+        {err && <div className="rb-card" style={{ padding: 16, color: "var(--warn)", fontSize: 13.5 }}>{err}</div>}
+
+        {suggestions && suggestions.length > 0 && (
+          <>
+            <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 12, lineHeight: 1.5 }}>
+              Based on {t.volume} gallons, {state.livestock.length} inhabitants
+              {latest ? ", and your latest test results" : ""}. Tap to add any you want.
+            </div>
+            {suggestions.map((s, i) => (
+              <div key={i} className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
+                    <div style={{ fontSize: 12, color: "var(--aqua)", marginTop: 2 }}>{s.every}</div>
+                    {s.why && <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>{s.why}</div>}
+                  </div>
+                  <button className={"rb-btn" + (added[i] ? " ghost" : "")} style={{ padding: "9px 14px", flex: "none" }}
+                    disabled={added[i]}
+                    onClick={() => { onAdd(s.name, s.every); setAdded((a) => ({ ...a, [i]: true })); }}>
+                    {added[i] ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button className="rb-btn ghost" style={{ width: "100%", marginTop: 4, padding: 12 }}
+              onClick={() => {
+                suggestions.forEach((s, i) => { if (!added[i]) onAdd(s.name, s.every); });
+                setAdded(Object.fromEntries(suggestions.map((_, i) => [i, true])));
+              }}>
+              Add all remaining
+            </button>
+          </>
+        )}
+        {suggestions && suggestions.length === 0 && !busy && (
+          <div className="rb-empty" style={{ padding: 24 }}>DeepDive thinks your current schedule already covers this tank. Nice.</div>
+        )}
       </div>
     </div>
   );
