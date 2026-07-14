@@ -247,6 +247,34 @@ const STYLES = `
 .rb-tcard-h b{font-family:'Bricolage Grotesque';font-size:16px;}
 .rb-tcard-h span{font-size:12px;color:var(--muted);}
 .rb-timg{height:118px;display:grid;place-items:center;color:rgba(4,17,26,.45);}
+
+/* ---------- responsive: tablet & desktop ---------- */
+.rb-postgrid{display:block;}
+@media (min-width: 768px){
+  .rb-shell{max-width:768px;padding:0 24px 130px;}
+  .rb-grid{grid-template-columns:repeat(4,1fr);}
+  .rb-mgrid{grid-template-columns:repeat(3,1fr);}
+  .rb-qcard{width:300px;}
+  .rb-tcard{width:220px;}
+  .rb-hscroll{padding:0 24px 6px;margin:0 -24px;}
+  .rb-postgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+  .rb-postgrid .rb-post{margin-bottom:0;}
+  .rb-overlay{align-items:center;padding:20px;}
+  .rb-sheet{border-radius:26px;max-height:82vh;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
+  .rb-cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
+  .rb-cols2 > *{margin-top:0 !important;}
+  .rb-cols2 > div > .rb-h2:first-child{margin-top:2px;}
+  .rb-authwrap{max-width:460px;margin:0 auto;}
+}
+@keyframes rbModal{from{transform:scale(.96);opacity:.4}to{transform:none;opacity:1}}
+@media (min-width: 1100px){
+  .rb-shell{max-width:1080px;}
+  .rb-mgrid{grid-template-columns:repeat(4,1fr);}
+  .rb-postgrid{grid-template-columns:repeat(3,1fr);}
+  .rb-qcard{width:320px;}
+  .rb-cols2.wide-40-60{grid-template-columns:2fr 3fr;}
+  .rb-fab{right:max(16px,calc(50% - 524px));}
+}
 `;
 
 /* ======================================================================= */
@@ -474,6 +502,7 @@ function AuthScreen() {
   return (
     <div className="rb-root"><style>{STYLES}</style>
       <div className="rb-shell" style={{ paddingTop: 70 }}>
+        <div className="rb-authwrap">
         <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}><CoralAvatar size={84} /></div>
         <ReefLogo />
         <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13.5, margin: "10px 0 24px" }}>
@@ -503,6 +532,7 @@ function AuthScreen() {
         </div>
         <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 16 }}>
           Your data syncs across devices. Marketplace listings and posts are visible to other reefers.
+        </div>
         </div>
       </div>
     </div>
@@ -700,6 +730,8 @@ function Profile({ state, fish, corals, issues, go }) {
   const t = state.tank;
   return (
     <div className="rb-fadein">
+      <div className="rb-cols2 wide-40-60">
+      <div>
       <div className="rb-card rb-phero">
         <div className="glow" />
         <CoralAvatar size={84} />
@@ -722,7 +754,9 @@ function Profile({ state, fish, corals, issues, go }) {
         <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
         <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("feed")}><PenSquare size={15} /> Create Post</button>
       </div>
+      </div>
 
+      <div>
       <div className="rb-h2"><Waves size={16} color="var(--teal)" /> My Tank <small>{t.model}</small></div>
       <div className="rb-tankhero">
         <div className="light" /><div className="rock" />
@@ -749,6 +783,8 @@ function Profile({ state, fish, corals, issues, go }) {
             </div>
           );
         })}
+      </div>
+      </div>
       </div>
     </div>
   );
@@ -803,6 +839,7 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
           </div>
         </div>
       </div>
+      <div className="rb-postgrid">
       {allPosts.map((post) => {
         const isLiked = liked[post.id];
         return (
@@ -821,6 +858,7 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
@@ -968,7 +1006,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock }) {
           <div style={{ marginTop: 5 }}>Tap the flask button below to log your first reading — charts and health tracking start from there.</div>
         </div>
       )}
-      {latest && (<>
+      {latest && (<div className="rb-cols2">
       <div className="rb-grid">
         {PARAMS.map((pp) => {
           const st = statusOf(pp, latest[pp.key]);
@@ -1000,7 +1038,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock }) {
           </LineChart>
         </ResponsiveContainer>
       </div>
-      </>)}
+      </div>)}
       <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{state.livestock.length} in tank</small></div>
       <div className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
         <div className="rb-tabs" style={{ margin: "0 0 10px" }}>
