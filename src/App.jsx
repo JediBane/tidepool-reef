@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
+import SPECIES_IMAGES from "./species-images.json";
 
 /* ======================================================================= */
 /*  Styles — "Actinic": a reef tank at night under blue LED                 */
@@ -1011,48 +1012,10 @@ function Feed({ allPosts, liked, toggleLike, addPost }) {
 
 /* ---------------- Reefpedia ---------------- */
 // Free species photos from Wikipedia's public API (CORS-open, no key, freely licensed).
-const wikiCache = {};
-async function fetchWikiSummaryImage(title) {
-  const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
-  if (!r.ok) return null;
-  const d = await r.json();
-  if (d.type === "disambiguation") return null;
-  return (d.originalimage && d.originalimage.source) || (d.thumbnail && d.thumbnail.source) || null;
-}
-async function resolveWikiImage(title, sci) {
-  // 1) direct title
-  try { const hit = await fetchWikiSummaryImage(title); if (hit) return hit; } catch (e) {}
-  // 2) fall back to a Wikipedia search on the scientific name, then take the best match
-  try {
-    const r = await fetch(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(sci || title)}&limit=3`);
-    if (r.ok) {
-      const d = await r.json();
-      for (const page of d.pages || []) {
-        if (page.thumbnail && page.thumbnail.url) {
-          const u = page.thumbnail.url;
-          return (u.startsWith("//") ? "https:" + u : u).replace(/\/\d+px-/, "/640px-");
-        }
-        const hit = await fetchWikiSummaryImage(page.key);
-        if (hit) return hit;
-      }
-    }
-  } catch (e) {}
-  return null;
-}
-function useWikiImage(title, sci) {
-  const [url, setUrl] = useState(() => (title in wikiCache ? wikiCache[title] : undefined));
-  useEffect(() => {
-    let alive = true;
-    if (!title) return;
-    if (title in wikiCache) { setUrl(wikiCache[title]); return; }
-    resolveWikiImage(title, sci).then((src) => {
-      wikiCache[title] = src;
-      if (alive) setUrl(src);
-    });
-    return () => { alive = false; };
-  }, [title, sci]);
-  return url; // undefined = loading, null = none, string = photo
-}
+// Species photos are downloaded from Wikimedia Commons at BUILD time (scripts/fetch-images.mjs)
+// and bundled into the site, so there's no runtime dependency on any external service.
+// Each photo's author + license is carried in the manifest and credited in the detail view.
+function photoOf(item) { return SPECIES_IMAGES[item.id] || null; }
 
 function SpeciesIcon({ cat, size = 30 }) {
   if (cat === "Fish") return <Fish size={size} />;
@@ -1061,17 +1024,20 @@ function SpeciesIcon({ cat, size = 30 }) {
   return <Waves size={size} />;
 }
 
-function WikiPhoto({ item, height, radius = 0 }) {
-  const url = useWikiImage(item.wiki, item.sci);
+function SpeciesPhoto({ item, height, radius = 0 }) {
+  const photo = photoOf(item);
+  const [failed, setFailed] = useState(false);
   return (
     <div style={{
       height, borderRadius: radius, position: "relative", overflow: "hidden",
       background: `linear-gradient(140deg,${item.g[0]},${item.g[1]})`,
       display: "grid", placeItems: "center", color: "rgba(4,17,26,.5)",
     }}>
-      {url && <img src={url} alt={item.name} loading="lazy"
-        style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
-      {!url && <SpeciesIcon cat={item.cat} size={height > 140 ? 40 : 30} />}
+      {photo && !failed && (
+        <img src={photo.src} alt={item.name} loading="lazy" onError={() => setFailed(true)}
+          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      )}
+      {(!photo || failed) && <SpeciesIcon cat={item.cat} size={height > 140 ? 40 : 30} />}
     </div>
   );
 }
@@ -1103,7 +1069,7 @@ function Library({ libCat, setLibCat, openItem }) {
         {shown.map((l) => (
           <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
             <div style={{ position: "relative" }}>
-              <WikiPhoto item={l} height={120} />
+              <SpeciesPhoto item={l} height={120} />
               <span className="cat" style={{ position: "absolute", top: 8, left: 8, fontSize: 10, background: "rgba(3,8,12,.72)",
                 padding: "3px 8px", borderRadius: 20, backdropFilter: "blur(6px)", border: `1px solid ${CAT_COLOR[l.cat]}66`, color: CAT_COLOR[l.cat] }}>
                 {l.cat}
@@ -1121,6 +1087,17 @@ function Library({ libCat, setLibCat, openItem }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function PhotoCredit({ item }) {
+  const p = photoOf(item);
+  if (!p) return null;
+  return (
+    <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 10.5, marginTop: 12, lineHeight: 1.5 }}>
+      Photo: {p.artist} · {p.license} · via{" "}
+      <a href={p.source} target="_blank" rel="noreferrer" style={{ color: "var(--muted)" }}>Wikimedia Commons</a>
     </div>
   );
 }
@@ -1148,7 +1125,7 @@ function LibDetail({ item, onClose }) {
           <b>{item.name}</b>
           <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
         </div>
-        <WikiPhoto item={item} height={190} radius={14} />
+        <SpeciesPhoto item={item} height={190} radius={14} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0 14px", flexWrap: "wrap" }}>
           <span style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13 }}>{item.sci}</span>
           <span className="rb-badge" style={{ background: CAT_COLOR[item.cat] + "22", color: CAT_COLOR[item.cat], border: `1px solid ${CAT_COLOR[item.cat]}55`, fontSize: 11 }}>
@@ -1173,7 +1150,7 @@ function LibDetail({ item, onClose }) {
         <button className="rb-btn violet" style={{ width: "100%", padding: 13 }} onClick={getTips} disabled={busy}>
           <Bot size={16} /> {busy ? "Asking DeepDive…" : isPest ? "Get an eradication plan" : "Care tips from DeepDive"}
         </button>
-        <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11, marginTop: 12 }}>Photo via Wikipedia</div>
+        <PhotoCredit item={item} />
       </div>
     </div>
   );
