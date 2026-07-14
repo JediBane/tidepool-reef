@@ -405,21 +405,31 @@ async function fetchKeepers(sid) {
 }
 async function fetchPublicTank(tankId) {
   const [{ data: tank }, { data: stock }] = await Promise.all([
-    supabase.from("tanks").select("*, owner:profiles(handle, display_name, location, reefing_since, badges)").eq("id", tankId).single(),
+    supabase.from("tanks").select("*").eq("id", tankId).single(),
     supabase.from("livestock").select("*").eq("tank_id", tankId).order("kind"),
   ]);
-  return { tank, stock: stock || [] };
+  let owner = null;
+  if (tank) {
+    const { data: p } = await supabase.from("profiles")
+      .select("handle, display_name, location, reefing_since, badges").eq("id", tank.owner_id).single();
+    owner = p;
+  }
+  return { tank: tank ? { ...tank, owner } : null, stock: stock || [] };
 }
 async function fetchThreads(uid) {
-  const { data } = await supabase.from("messages")
-    .select("*, sender:profiles!messages_sender_id_fkey(handle), recipient:profiles!messages_recipient_id_fkey(handle)")
-    .or(`sender_id.eq.${uid},recipient_id.eq.${uid}`)
-    .order("created_at", { ascending: false }).limit(200);
+  const [{ data, error }, { data: pf }] = await Promise.all([
+    supabase.from("messages").select("*")
+      .or(`sender_id.eq.${uid},recipient_id.eq.${uid}`)
+      .order("created_at", { ascending: false }).limit(200),
+    supabase.from("profiles").select("id, handle"),
+  ]);
+  if (error) console.error("[tidepool] messages query failed:", error.message);
+  const people = {};
+  (pf || []).forEach((p) => (people[p.id] = p.handle));
   const threads = {};
   (data || []).forEach((m) => {
     const other = m.sender_id === uid ? m.recipient_id : m.sender_id;
-    const handle = m.sender_id === uid ? (m.recipient && m.recipient.handle) : (m.sender && m.sender.handle);
-    if (!threads[other]) threads[other] = { id: other, handle: handle || "reefer", msgs: [] };
+    if (!threads[other]) threads[other] = { id: other, handle: people[other] || "reefer", msgs: [] };
     threads[other].msgs.push(m);
   });
   Object.values(threads).forEach((t) => t.msgs.reverse());
@@ -460,14 +470,22 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, allLikes, kr, counts] = await Promise.all([
+  const [children, mr, sr, allLikes, kr, counts, pf] = await Promise.all([
     fetchTankChildren(active.id),
-    supabase.from("listings").select("*, seller:profiles(handle)").eq("status", "active").order("created_at", { ascending: false }).limit(50),
-    supabase.from("posts").select("*, author:profiles(handle, display_name)").order("created_at", { ascending: false }).limit(50),
+    supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
+    supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("post_likes").select("post_id"),
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
     fetchSpeciesCounts(),
+    supabase.from("profiles").select("id, handle, display_name"),
   ]);
+  // Surface failures instead of silently rendering an empty feed.
+  [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf]].forEach(([label, r]) => {
+    if (r && r.error) console.error(`[tidepool] ${label} query failed:`, r.error.message, r.error.details || "");
+  });
+
+  const people = {};
+  (pf.data || []).forEach((p) => (people[p.id] = p));
   const liked = {};
   (kr.data || []).forEach((r) => (liked[r.post_id] = true));
   const likeCounts = {};
@@ -483,14 +501,17 @@ async function fetchAll(uid) {
     ...children,
     listings: (mr.data || []).map((r, i) => ({
       id: r.id, cat: r.category, title: r.title, price: Number(r.price_usd),
-      loc: r.location || "", seller: (r.seller && r.seller.handle) || "reefer", g: PALETTE[i % PALETTE.length],
+      loc: r.location || "", seller: (people[r.seller_id] && people[r.seller_id].handle) || "reefer", g: PALETTE[i % PALETTE.length],
     })),
-    posts: (sr.data || []).map((r) => ({
-      id: r.id, user: (r.author && (r.author.display_name || r.author.handle)) || "reefer",
-      handle: (r.author && r.author.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
-      time: rel(r.created_at), body: r.body, img: null,
-      likes: likeCounts[r.id] || 0, comments: 0,
-    })),
+    posts: (sr.data || []).map((r) => {
+      const a = people[r.author_id];
+      return {
+        id: r.id, user: (a && (a.display_name || a.handle)) || "reefer",
+        handle: (a && a.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
+        time: rel(r.created_at), body: r.body, img: null,
+        likes: likeCounts[r.id] || 0, comments: 0, mine: r.author_id === uid,
+      };
+    }),
     liked,
   };
 }
@@ -699,9 +720,18 @@ export default function TidepoolReef() {
     await supabase.from("listings").insert({ seller_id: state.uid, category: l.cat, title: l.title, price_usd: l.price, location: loc });
     award(3);
   };
-  const addPost = async (body) => {
-    setState((s) => ({ ...s, posts: [{ id: "tmp" + Date.now(), user: s.profile.display_name || s.profile.handle, handle: s.profile.handle, tag: "Update", tagc: "#3fe3ff", time: "now", body, img: null, likes: 0, comments: 0 }, ...s.posts] }));
-    await supabase.from("posts").insert({ author_id: state.uid, tag: "Update", body });
+  const addPost = async (body, tag = "Update") => {
+    const { data, error } = await supabase.from("posts")
+      .insert({ author_id: state.uid, tag, body }).select().single();
+    if (error) {
+      console.error("[tidepool] post failed:", error.message);
+      alert("Couldn't publish that post: " + error.message);
+      return;
+    }
+    setState((s) => ({ ...s, posts: [{
+      id: data.id, user: s.profile.display_name || s.profile.handle, handle: s.profile.handle,
+      tag, tagc: TAG_COLOR[tag] || "#3fe3ff", time: "now", body, img: null, likes: 0, comments: 0, mine: true,
+    }, ...s.posts] }));
     award(3);
   };
   const toggleLike = async (id) => {
