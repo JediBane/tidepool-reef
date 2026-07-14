@@ -673,7 +673,7 @@ export default function TidepoolReef() {
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
-        {view === "deepdive" && <DeepDive {...{ state, latest, issues }} />}
+        {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
@@ -1330,7 +1330,7 @@ function ReefID() {
 }
 
 /* ---------------- DeepDive AI ---------------- */
-function DeepDive({ state, latest, issues }) {
+function DeepDive({ state, latest, issues, switchTank }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1340,7 +1340,13 @@ function DeepDive({ state, latest, issues }) {
   const snapshot = () => latest
     ? PARAMS.map((p) => `${p.label}: ${latest[p.key]}${p.unit} (target ${p.ideal[0]}-${p.ideal[1]}, ${statusOf(p, latest[p.key])})`).join("; ")
     : "No test results logged yet.";
-  const SYS = "You are Tidepool Reef DeepDive, a concise expert saltwater reef-aquarium advisor inside the Tidepool Reef app. Give practical, friendly, specific guidance. Keep answers short. If parameters are provided, focus on what's drifting and 2-3 concrete actions. Never recommend dangerous dosing.";
+  const t = state.tank;
+  const SYS = "You are Tidepool Reef DeepDive, a concise expert saltwater reef-aquarium advisor inside the Tidepool Reef app. " +
+    `The user is currently asking about their tank "${t.name}" (${t.model}, ${t.volume} gallons, running since ${t.since}). ` +
+    `Latest test results for ${t.name} — ${snapshot()} ` +
+    `Livestock in ${t.name}: ${state.livestock.map((l) => l.name).join(", ") || "none logged"}. ` +
+    "Answer questions about THIS tank using this context unless the user clearly asks about something else. " +
+    "Give practical, friendly, specific guidance. Keep answers short. Focus on what's drifting and 2-3 concrete actions. Never recommend dangerous dosing.";
 
   async function send(text, display) {
     const history = [...msgs, { role: "user", content: display || text }];
@@ -1359,6 +1365,12 @@ function DeepDive({ state, latest, issues }) {
   };
   return (
     <div className="rb-fadein">
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={async (id) => { await switchTank(id); setMsgs([]); }} />
+      {state.tanks.length > 1 && (
+        <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 2px 12px", display: "flex", alignItems: "center", gap: 6 }}>
+          <Bot size={14} color="var(--aqua)" /> DeepDive is looking at <b style={{ color: "var(--text)" }}>{t.name}</b> — switch tanks above to ask about another.
+        </div>
+      )}
       <div className="rb-ai-msgs" ref={scroller}>
         {msgs.length === 0 && (
           <div className="rb-empty"><Bot size={28} color="var(--aqua)" style={{ opacity: .85 }} />
@@ -1369,7 +1381,7 @@ function DeepDive({ state, latest, issues }) {
       </div>
       {msgs.length === 0 && (
         <button className="rb-btn violet" style={{ width: "100%", marginBottom: 12, padding: 13 }} onClick={diagnose} disabled={busy}>
-          <TrendingUp size={16} /> Diagnose my tank{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
+          <TrendingUp size={16} /> Diagnose {t.name}{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
         </button>
       )}
       <div className="rb-ai-row">
