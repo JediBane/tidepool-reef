@@ -1331,6 +1331,63 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
 // Each photo's author + license is carried in the manifest and credited in the detail view.
 function photoOf(item) { return SPECIES_IMAGES[item.id] || null; }
 
+/* Safety net: if a photo wasn't bundled at build time, fetch it live once and cache it,
+   so Reefpedia never shows a bare gradient just because a build hiccuped. */
+const runtimeCache = {};
+function loadCache() {
+  try { return JSON.parse(localStorage.getItem("tr:pics") || "{}"); } catch (e) { return {}; }
+}
+function saveCache(c) { try { localStorage.setItem("tr:pics", JSON.stringify(c)); } catch (e) {} }
+
+async function resolveRuntimePhoto(item) {
+  const disk = loadCache();
+  if (disk[item.id] !== undefined) return disk[item.id];
+  const tryTitle = async (title) => {
+    try {
+      const r = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`);
+      if (!r.ok) return null;
+      const d = await r.json();
+      if (d.type === "disambiguation") return null;
+      return (d.thumbnail && d.thumbnail.source) || (d.originalimage && d.originalimage.source) || null;
+    } catch (e) { return null; }
+  };
+  let src = await tryTitle(item.wiki);
+  if (!src) {
+    try {
+      const r = await fetch(`https://en.wikipedia.org/w/rest.php/v1/search/page?q=${encodeURIComponent(item.sci)}&limit=3`);
+      if (r.ok) {
+        const d = await r.json();
+        for (const p of d.pages || []) {
+          if (p.thumbnail && p.thumbnail.url) {
+            const u = p.thumbnail.url;
+            src = (u.startsWith("//") ? "https:" + u : u).replace(/\/\d+px-/, "/640px-");
+            break;
+          }
+        }
+      }
+    } catch (e) {}
+  }
+  disk[item.id] = src;   // cache misses too, so we don't retry forever
+  saveCache(disk);
+  return src;
+}
+
+function useSpeciesPhoto(item) {
+  const bundled = photoOf(item);
+  const [url, setUrl] = useState(() => (bundled ? bundled.src : runtimeCache[item.id]));
+  useEffect(() => {
+    if (bundled) { setUrl(bundled.src); return; }
+    let alive = true;
+    if (runtimeCache[item.id] !== undefined) { setUrl(runtimeCache[item.id]); return; }
+    resolveRuntimePhoto(item).then((src) => {
+      runtimeCache[item.id] = src;
+      if (alive) setUrl(src);
+    });
+    return () => { alive = false; };
+  }, [item.id]);
+  return url;
+}
+
 function SpeciesIcon({ cat, size = 30 }) {
   if (cat === "Fish") return <Fish size={size} />;
   if (cat === "Invert") return <Shell size={size} />;
@@ -1339,19 +1396,20 @@ function SpeciesIcon({ cat, size = 30 }) {
 }
 
 function SpeciesPhoto({ item, height, radius = 0 }) {
-  const photo = photoOf(item);
+  const url = useSpeciesPhoto(item);
   const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [url]);
   return (
     <div style={{
       height, borderRadius: radius, position: "relative", overflow: "hidden",
       background: `linear-gradient(140deg,${item.g[0]},${item.g[1]})`,
       display: "grid", placeItems: "center", color: "rgba(4,17,26,.5)",
     }}>
-      {photo && !failed && (
-        <img src={photo.src} alt={item.name} loading="lazy" onError={() => setFailed(true)}
+      {url && !failed && (
+        <img src={url} alt={item.name} loading="lazy" onError={() => setFailed(true)}
           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
       )}
-      {(!photo || failed) && <SpeciesIcon cat={item.cat} size={height > 140 ? 40 : 30} />}
+      {(!url || failed) && <SpeciesIcon cat={item.cat} size={height > 140 ? 40 : 30} />}
     </div>
   );
 }
@@ -1412,7 +1470,11 @@ function Library({ libCat, setLibCat, openItem, counts }) {
 
 function PhotoCredit({ item }) {
   const p = photoOf(item);
-  if (!p) return null;
+  if (!p) return (
+    <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 10.5, marginTop: 12 }}>
+      Photo via Wikimedia Commons
+    </div>
+  );
   return (
     <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 10.5, marginTop: 12, lineHeight: 1.5 }}>
       Photo: {p.artist} · {p.license} · via{" "}

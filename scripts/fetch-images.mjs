@@ -25,9 +25,31 @@ const UA = "TidepoolReef/1.0 (reef aquarium reference app; contact via github.co
 const HEADERS = { "User-Agent": UA, "Api-User-Agent": UA };
 const WIDTH = 1024; // plenty for retina cards + detail sheets; keeps the bundle lean
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** fetch with timeout + retry/backoff — Wikimedia occasionally throttles or stalls. */
+async function tryFetch(url, tries = 4) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    try {
+      const r = await fetch(url, { headers: HEADERS, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (r.status === 429 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      await sleep(400 * Math.pow(2, i));   // 0.4s, 0.8s, 1.6s, 3.2s
+    }
+  }
+  throw lastErr;
+}
+
 async function getJSON(url) {
-  const r = await fetch(url, { headers: HEADERS });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await tryFetch(url);
   return r.json();
 }
 
@@ -91,8 +113,7 @@ async function resolve(entry) {
 }
 
 async function download(url, dest) {
-  const r = await fetch(url, { headers: HEADERS });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await tryFetch(url);
   const buf = Buffer.from(await r.arrayBuffer());
   if (buf.length < 1000) throw new Error("suspiciously small image");
   fs.writeFileSync(dest, buf);
@@ -113,9 +134,10 @@ async function main() {
 
   // Modest concurrency — be a good Wikimedia citizen.
   const queue = [...entries];
-  const workers = Array.from({ length: 4 }, async () => {
+  const workers = Array.from({ length: 3 }, async () => {
     while (queue.length) {
       const e = queue.shift();
+      await sleep(120);                       // be a polite Wikimedia client
       const file = `${e.id}.jpg`;
       const dest = path.join(OUT_DIR, file);
       try {
@@ -138,7 +160,8 @@ async function main() {
   await Promise.all(workers);
 
   fs.writeFileSync(MANIFEST, JSON.stringify(manifest, null, 2));
-  console.log(`[reefpedia] ${ok} photos bundled, ${miss} without images.`);
+  console.log(`[reefpedia] ${ok}/${entries.length} photos bundled, ${miss} missing.`);
+  if (miss > 0) console.log("[reefpedia] missing entries will fall back to a runtime Wikipedia lookup in the app.");
 
   // Human-readable credits for the repo.
   const credits = Object.entries(manifest)
