@@ -2281,9 +2281,51 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
       (r.name.toLowerCase().includes(q) || r.sci.toLowerCase().includes(q)))
     .slice(0, 5);
   const p = PARAMS.find((x) => x.key === sel);
-  const chartData = state.history.map((h) => ({ date: h.date, v: h[sel] }));
+  const [range, setRange] = useState(90);            // days; 0 = all; "custom"
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [aiSummary, setAiSummary] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+
+  const RANGES = [["3d", 3], ["5d", 5], ["7d", 7], ["14d", 14], ["30d", 30], ["90d", 90], ["All", 0]];
+  const now = Date.now();
+  const useCustom = range === "custom" && customFrom && customTo;
+  const fromTs = useCustom ? new Date(customFrom + "T00:00").getTime() : (range && range !== "custom" ? now - range * dayMs : 0);
+  const toTs = useCustom ? new Date(customTo + "T23:59").getTime() : now;
+
+  const chartData = state.history
+    .filter((h) => h.date >= fromTs && h.date <= toTs)
+    .map((h) => ({ date: h.date, v: h[sel] }));
   const prev = state.history.length > 1 ? state.history[state.history.length - 2][sel] : latest ? latest[sel] : 0;
   const delta = latest ? +(latest[sel] - prev).toFixed(p.dec) : 0;
+
+  const vals = chartData.map((d) => d.v).filter((v) => v != null);
+  const stats = vals.length ? {
+    min: Math.min(...vals), max: Math.max(...vals),
+    avg: +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(p.dec),
+    first: vals[0], last: vals[vals.length - 1], n: vals.length,
+  } : null;
+  const rangeLabel = useCustom ? `${fmtDate(fromTs)} – ${fmtDate(toTs)}` : (range && range !== "custom" ? `last ${range} days` : "all time");
+
+  useEffect(() => { setAiSummary(""); }, [sel, range, customFrom, customTo]);
+
+  const summarize = async () => {
+    if (!stats) return;
+    setAiBusy(true);
+    const series = chartData.map((d) => `${fmtDate(d.date)}: ${d.v}`).join(", ");
+    const prompt =
+      `Summarize the trend for ${p.label} in a reef tank over ${rangeLabel}. ` +
+      `Target range is ${p.ideal[0]}–${p.ideal[1]} ${p.unit}. ` +
+      `Readings (${stats.n}): ${series}. ` +
+      `Min ${stats.min}, max ${stats.max}, average ${stats.avg}, started ${stats.first}, ended ${stats.last}. ` +
+      `In 2-3 short sentences: is it stable or drifting, in or out of range, and one specific suggestion if needed. Be direct.`;
+    try {
+      const r = await askReefAI([{ role: "user", content: prompt }],
+        "You are Tidepool Reef DeepDive, a concise expert reef-aquarium advisor. 2-3 sentences max, specific and practical.");
+      setAiSummary(r || "Couldn't generate a summary right now.");
+    } catch (e) { setAiSummary("DeepDive error: " + (e.message || "connection failed")); }
+    setAiBusy(false);
+  };
   return (
     <div className="rb-fadein">
       {!livestockOnly && (<>
@@ -2310,8 +2352,50 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
       </div>
       <div className="rb-card rb-chartwrap" style={{ marginTop: 12 }}>
         <div className="rb-chart-h"><b>{p.label} trend</b>
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>{delta === 0 ? "no change" : (delta > 0 ? "▲ " : "▼ ") + Math.abs(delta) + " " + p.unit}</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>{rangeLabel}{stats ? ` · ${stats.n} readings` : ""}</span>
         </div>
+
+        <div className="rb-tabs" style={{ margin: "0 0 6px", padding: "0 10px", flexWrap: "wrap" }}>
+          {RANGES.map(([lbl, d]) => {
+            const count = d ? state.history.filter((h) => h.date >= now - d * dayMs).length : state.history.length;
+            const empty = count === 0;
+            return (
+              <div key={lbl} className={"rb-chip" + (range === d && range !== "custom" ? " on" : "")}
+                style={{ fontSize: 11.5, opacity: empty ? 0.35 : 1, cursor: empty ? "not-allowed" : "pointer" }}
+                onClick={() => !empty && setRange(d)}>{lbl}</div>
+            );
+          })}
+          <div className={"rb-chip" + (range === "custom" ? " on" : "")} style={{ fontSize: 11.5 }}
+            onClick={() => setRange(range === "custom" ? 90 : "custom")}>Custom</div>
+        </div>
+
+        {range === "custom" && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 12px 10px", flexWrap: "wrap" }}>
+            <input className="rb-input" type="date" value={customFrom} max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)} style={{ flex: 1, minWidth: 130, fontSize: 12.5 }} />
+            <span style={{ color: "var(--muted)", fontSize: 12 }}>to</span>
+            <input className="rb-input" type="date" value={customTo} min={customFrom || undefined}
+              onChange={(e) => setCustomTo(e.target.value)} style={{ flex: 1, minWidth: 130, fontSize: 12.5 }} />
+          </div>
+        )}
+
+        {stats && (
+          <div style={{ display: "flex", gap: 16, padding: "2px 12px 10px", flexWrap: "wrap" }}>
+            {[["Low", stats.min], ["Avg", stats.avg], ["High", stats.max]].map(([k, v]) => (
+              <div key={k} style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                <span style={{ fontSize: 11, color: "var(--muted)" }}>{k}</span>
+                <span style={{ fontSize: 14, fontWeight: 700 }}>{v}</span>
+                <span style={{ fontSize: 10.5, color: "var(--muted-2)" }}>{p.unit}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {chartData.length === 0 && (
+          <div className="rb-empty" style={{ padding: "30px 20px" }}>No readings in this range. Pick a wider window.</div>
+        )}
+
+        {chartData.length > 0 && (
         <ResponsiveContainer width="100%" height={200}>
           <LineChart data={chartData} margin={{ top: 8, right: 14, left: -8, bottom: 4 }}>
             <CartesianGrid stroke="rgba(255,255,255,.05)" vertical={false} />
@@ -2326,6 +2410,33 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
             <Line type="monotone" dataKey="v" stroke="var(--aqua)" strokeWidth={2.5} dot={{ r: 2.5, fill: "var(--aqua)" }} activeDot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
+        )}
+
+        {stats && (
+          <div style={{ padding: "6px 12px 4px" }}>
+            {!aiSummary && !aiBusy && (
+              <button className="rb-btn violet" style={{ width: "100%", padding: 12 }} onClick={summarize}>
+                <Bot size={16} /> Summarize this {rangeLabel} with AI
+              </button>
+            )}
+            {aiBusy && (
+              <div className="rb-card" style={{ padding: 14, display: "flex", alignItems: "center", gap: 10, background: "rgba(176,108,255,.08)" }}>
+                <div className="rb-typing"><i /><i /><i /></div>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>Reading {stats.n} {p.label} points…</span>
+              </div>
+            )}
+            {aiSummary && !aiBusy && (
+              <div className="rb-card" style={{ padding: 14, background: "rgba(176,108,255,.08)", border: "1px solid rgba(176,108,255,.25)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 7 }}>
+                  <Bot size={15} color="var(--violet)" />
+                  <b style={{ fontSize: 12.5, color: "var(--violet)" }}>DeepDive · {p.label} over {rangeLabel}</b>
+                  <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted)", cursor: "pointer" }} onClick={summarize}>refresh</span>
+                </div>
+                <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#e8f4f8", whiteSpace: "pre-wrap" }}>{aiSummary}</div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       </div>)}
       </>)}
