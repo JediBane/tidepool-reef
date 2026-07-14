@@ -446,6 +446,7 @@ async function askReefAI(messages, system) {
     body: JSON.stringify({ max_tokens: 1000, system, messages }),
   });
   const data = await res.json();
+  if (data && data.error) throw new Error(data.error.message || "AI request failed");
   return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 }
 
@@ -1105,9 +1106,24 @@ function ReefID() {
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    const reader = new FileReader();
-    reader.onload = () => { const s = reader.result; setImg({ b64: s.split(",")[1], media: f.type || "image/jpeg", url: s }); setResult(""); };
-    reader.readAsDataURL(f);
+    // Downscale to ≤1600px JPEG so big camera photos fit the function payload limit
+    const url = URL.createObjectURL(f);
+    const im = new Image();
+    im.onload = () => {
+      const scale = Math.min(1, 1600 / Math.max(im.width, im.height));
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(im.width * scale); cv.height = Math.round(im.height * scale);
+      cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+      const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+      setImg({ b64: dataUrl.split(",")[1], media: "image/jpeg", url: dataUrl });
+      setResult(""); URL.revokeObjectURL(url);
+    };
+    im.onerror = () => { // fall back to raw file if decode fails
+      const reader = new FileReader();
+      reader.onload = () => { const s = reader.result; setImg({ b64: s.split(",")[1], media: f.type || "image/jpeg", url: s }); setResult(""); };
+      reader.readAsDataURL(f);
+    };
+    im.src = url;
   };
   const identify = async () => {
     if (!img) return; setBusy(true); setResult("");
@@ -1124,9 +1140,10 @@ function ReefID() {
         }),
       });
       const data = await res.json();
+      if (data && data.error) throw new Error(data.error.message || "AI request failed");
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
       setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
-    } catch (e) { setResult("Couldn't reach Reef ID right now. Check the connection and try again."); }
+    } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
     setBusy(false);
   };
   return (
@@ -1172,7 +1189,7 @@ function DeepDive({ state, latest, issues }) {
       const apiMsgs = [...msgs.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: text }];
       const reply = await askReefAI(apiMsgs, SYS);
       setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
-    } catch (e) { setMsgs((m) => [...m, { role: "assistant", content: "I couldn't reach DeepDive right now. Try again in a moment." }]); }
+    } catch (e) { setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
     setBusy(false);
   }
   const diagnose = () => {
