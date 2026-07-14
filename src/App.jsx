@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
+import { ZOAS, ZOA_TIERS, ZOA_CARE, ZOA_TIPS } from "./zoas.js";
 import SPECIES_IMAGES from "./species-images.json";
 
 /* ======================================================================= */
@@ -636,6 +637,7 @@ export default function TidepoolReef() {
   const [libCat, setLibCat] = useState("All");
   const [sheet, setSheet] = useState(null);        // log|sell|libDetail
   const [libItem, setLibItem] = useState(null);
+  const [addItem, setAddItem] = useState(null);
   const [publicTank, setPublicTank] = useState(null);
   const [msgTo, setMsgTo] = useState(null);
   const [toast, setToast] = useState(0);
@@ -717,6 +719,18 @@ export default function TidepoolReef() {
     setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: note || "", c, species_id: speciesId || null }] }));
     await supabase.from("livestock").insert({ tank_id: state.tankId, kind, name, note: note || null, color: c, species_id: speciesId || null });
     if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (s.livestock.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
+  };
+  const addLivestockTo = async (tankId, kind, name, speciesId) => {
+    const c = KIND_COLOR[kind] || "#3fe3ff";
+    const { error } = await supabase.from("livestock")
+      .insert({ tank_id: tankId, kind, name, color: c, species_id: speciesId || null });
+    if (error) { console.error("[tidepool] add livestock failed:", error.message); return; }
+    if (tankId === state.tankId) {
+      setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: "", c, species_id: speciesId }] }));
+    }
+    const counts = await fetchSpeciesCounts();
+    setState((s) => ({ ...s, speciesCounts: counts }));
+    award(2);
   };
   const sendMessage = async (toId, body, speciesId) => {
     await supabase.from("messages").insert({ sender_id: state.uid, recipient_id: toId, body, species_id: speciesId || null });
@@ -813,7 +827,7 @@ export default function TidepoolReef() {
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
         {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
-        {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
+        {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
         {view === "reefid" && <ReefID />}
@@ -875,8 +889,12 @@ export default function TidepoolReef() {
       {/* sheets */}
       {sheet === "log" && <LogSheet latest={latest} onClose={() => setSheet(null)} onSave={saveLog} />}
       {sheet === "sell" && <SellSheet onClose={() => setSheet(null)} onSave={addListing} />}
+      {addItem && (
+        <AddToTankSheet item={addItem} tanks={state.tanks} onClose={() => setAddItem(null)} onAdd={addLivestockTo} />
+      )}
       {sheet === "libDetail" && libItem && (
         <LibDetail item={libItem} uid={state.uid} count={state.speciesCounts[libItem.id] || 0}
+          onAddToTank={setAddItem}
           onClose={() => setSheet(null)}
           onOpenTank={(tid) => { setPublicTank(tid); setSheet("publicTank"); }}
           onMessage={(who) => { setMsgTo({ ...who, species: libItem }); setSheet("message"); }} />
@@ -1324,6 +1342,219 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
   );
 }
 
+
+/* ---------------- Add to tank ---------------- */
+function AddToTankSheet({ item, tanks, onClose, onAdd }) {
+  const [done, setDone] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const kind = item.kind || (item.cat === "Fish" ? "Fish" : item.cat === "Invert" ? "Invert" : "Coral");
+  const add = async (tank) => {
+    setBusy(true);
+    await onAdd(tank.id, kind, item.name, item.id);
+    setBusy(false);
+    setDone(tank);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h">
+          <b>{done ? "Added" : "Add to which tank?"}</b>
+          <div className="rb-iconbtn" onClick={onClose}><X size={18} /></div>
+        </div>
+        {done ? (
+          <div className="rb-empty" style={{ padding: "34px 20px" }}>
+            <Check size={30} color="var(--good)" />
+            <div style={{ marginTop: 12, color: "var(--text)", fontWeight: 600 }}>{item.name} added to {done.name}</div>
+            <div style={{ marginTop: 6 }}>Other reefers can now find you as a keeper.</div>
+            <button className="rb-btn" style={{ marginTop: 16, padding: "11px 20px" }} onClick={onClose}>Done</button>
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 14 }}>
+              Adding <b style={{ color: "var(--text)" }}>{item.name}</b> as {kind === "Fish" ? "a fish" : kind === "Invert" ? "an invert" : "a coral"}.
+            </div>
+            <div className="rb-card">
+              {tanks.map((t) => (
+                <div key={t.id} className="rb-li" style={{ cursor: busy ? "wait" : "pointer" }} onClick={() => !busy && add(t)}>
+                  <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--aqua),var(--violet))", width: 40, height: 40 }}>
+                    <Waves size={18} color="#04111a" />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div className="nm">{t.name}</div>
+                    <div className="sub">{t.model} · {t.volume} gal</div>
+                  </div>
+                  <ChevronRight size={17} color="var(--muted)" />
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Zoa polyp illustration ----------------
+   Named zoa morphs are trade names, not species — there are no freely-licensed photos
+   of them. Rather than fake a photo, we render the morph's actual color signature
+   (skirt / ring / mouth), which is what reefers use to ID one. */
+function ZoaPolyp({ z, size = 120 }) {
+  const r = size / 2;
+  const tentacles = 28;
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" style={{ display: "block" }}>
+      <defs>
+        <radialGradient id={`sk-${z.id}`} cx="50%" cy="50%">
+          <stop offset="55%" stopColor={z.skirt} />
+          <stop offset="100%" stopColor={z.skirt} stopOpacity="0.75" />
+        </radialGradient>
+        <radialGradient id={`ct-${z.id}`} cx="50%" cy="50%">
+          <stop offset="0%" stopColor={z.mouth} />
+          <stop offset="60%" stopColor={z.center} />
+          <stop offset="100%" stopColor={z.ring} />
+        </radialGradient>
+      </defs>
+      {/* skirt tentacles */}
+      {Array.from({ length: tentacles }).map((_, i) => {
+        const a = (i / tentacles) * Math.PI * 2;
+        const x1 = 50 + Math.cos(a) * 26, y1 = 50 + Math.sin(a) * 26;
+        const x2 = 50 + Math.cos(a) * 45, y2 = 50 + Math.sin(a) * 45;
+        return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={z.skirt} strokeWidth="3.2" strokeLinecap="round" opacity="0.95" />;
+      })}
+      <circle cx="50" cy="50" r="27" fill={`url(#sk-${z.id})`} />
+      <circle cx="50" cy="50" r="19" fill={z.ring} />
+      <circle cx="50" cy="50" r="13" fill={`url(#ct-${z.id})`} />
+      <ellipse cx="50" cy="50" rx="5.5" ry="3" fill={z.mouth} />
+      <ellipse cx="50" cy="50" rx="2.6" ry="1.2" fill={z.center} opacity="0.8" />
+    </svg>
+  );
+}
+
+const TIER_COLOR = { Starter: "#3ce0a3", Mid: "#3fe3ff", "High-End": "#b06cff", Grail: "#ffc24d" };
+
+function ZoaGuide({ onAddToTank }) {
+  const [tier, setTier] = useState("All");
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(null);
+  const query = q.trim().toLowerCase();
+  const shown = ZOAS.filter((z) =>
+    (tier === "All" || z.tier === tier) &&
+    (!query || z.name.toLowerCase().includes(query) || z.note.toLowerCase().includes(query)));
+  return (
+    <>
+      <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
+        <Search size={17} color="var(--muted)" />
+        <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }}
+          placeholder={`Search ${ZOAS.length} zoa & paly morphs…`} value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <div className="rb-tabs" style={{ marginTop: 14 }}>
+        {ZOA_TIERS.map((t) => (
+          <div key={t} className={"rb-chip" + (tier === t ? " on" : "")} onClick={() => setTier(t)}>{t}</div>
+        ))}
+      </div>
+
+      <div className="rb-card" style={{ padding: 14, marginBottom: 14, fontSize: 12.5, color: "var(--muted)", lineHeight: 1.55 }}>
+        Zoa morphs are hobbyist trade names, so there are no freely-licensed photos of them.
+        Each polyp below is drawn from its real color signature — skirt, ring, and mouth — which is
+        how you actually tell morphs apart. Husbandry is the same across all of them.
+      </div>
+
+      <div className="rb-mgrid">
+        {shown.map((z) => (
+          <div key={z.id} className="rb-card rb-mcard" onClick={() => setOpen(z)}>
+            <div style={{ position: "relative", display: "grid", placeItems: "center", padding: "10px 0 4px",
+              background: `radial-gradient(circle at 50% 50%, ${z.skirt}22, transparent 70%)` }}>
+              <ZoaPolyp z={z} size={110} />
+              <span style={{ position: "absolute", top: 8, left: 8, fontSize: 10, background: "rgba(3,8,12,.72)",
+                padding: "3px 8px", borderRadius: 20, border: `1px solid ${TIER_COLOR[z.tier]}66`, color: TIER_COLOR[z.tier] }}>
+                {z.tier}
+              </span>
+            </div>
+            <div className="rb-mbody">
+              <div className="t">{z.name}</div>
+              <div className="rb-care">
+                <span>{z.growth}</span>
+                <span>{z.polyp}</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {shown.length === 0 && <div className="rb-card rb-empty">No morphs match “{q}”.</div>}
+
+      {open && <ZoaSheet z={open} onClose={() => setOpen(null)} onAddToTank={onAddToTank} />}
+    </>
+  );
+}
+
+function ZoaSheet({ z, onClose, onAddToTank }) {
+  const [tips, setTips] = useState("");
+  const [busy, setBusy] = useState(false);
+  const getTips = async () => {
+    setBusy(true);
+    try {
+      const r = await askReefAI(
+        [{ role: "user", content: `I want to keep the zoanthid morph "${z.name}" in my reef tank. Give me 4 short, practical tips for getting it to color up and spread. One line each.` }],
+        "You are Tidepool Reef DeepDive, an expert reef advisor. Be concise and specific.");
+      setTips(r || "Couldn't load tips right now.");
+    } catch (e) { setTips("DeepDive error: " + (e.message || "connection failed")); }
+    setBusy(false);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>{z.name}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+
+        <div style={{ display: "grid", placeItems: "center", padding: "10px 0 16px", borderRadius: 16,
+          background: `radial-gradient(circle at 50% 45%, ${z.skirt}26, transparent 72%)` }}>
+          <ZoaPolyp z={z} size={190} />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0" }}>
+          <span className="rb-badge" style={{ background: TIER_COLOR[z.tier] + "22", color: TIER_COLOR[z.tier], border: `1px solid ${TIER_COLOR[z.tier]}55`, fontSize: 11 }}>{z.tier}</span>
+          <span className="rb-badge" style={{ background: "rgba(255,255,255,.05)", color: "var(--muted)", border: "1px solid var(--brd)", fontSize: 11 }}>{z.growth} growth</span>
+          <span className="rb-badge" style={{ background: "rgba(255,255,255,.05)", color: "var(--muted)", border: "1px solid var(--brd)", fontSize: 11 }}>{z.polyp} polyps</span>
+        </div>
+
+        <div style={{ fontSize: 14, lineHeight: 1.6, color: "#d8eef5", marginBottom: 14 }}>{z.note}</div>
+
+        <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}>Color signature</div>
+        <div className="rb-card" style={{ padding: 14, marginBottom: 14, display: "flex", gap: 14, justifyContent: "space-around" }}>
+          {[["Skirt", z.skirt], ["Ring", z.ring], ["Center", z.center], ["Mouth", z.mouth]].map(([k, c]) => (
+            <div key={k} style={{ textAlign: "center" }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: c, margin: "0 auto 6px", border: "1px solid rgba(255,255,255,.15)" }} />
+              <div style={{ fontSize: 11, color: "var(--muted)" }}>{k}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}>Care <small>same for all zoas</small></div>
+        <div className="rb-card" style={{ padding: "4px 14px", marginBottom: 14 }}>
+          {ZOA_CARE.map(([k, v], i) => (
+            <div key={i} style={{ display: "flex", gap: 12, padding: "10px 0",
+              borderBottom: i < ZOA_CARE.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
+              <span style={{ fontSize: 12.5, color: k.startsWith("⚠️") ? "var(--warn)" : "var(--muted)", minWidth: 92 }}>{k}</span>
+              <span style={{ fontSize: 13.5, fontWeight: 600, flex: 1, color: k.startsWith("⚠️") ? "var(--warn)" : "var(--text)" }}>{v}</span>
+            </div>
+          ))}
+        </div>
+
+        {tips && <div className="rb-card" style={{ padding: 14, marginBottom: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button className="rb-btn" style={{ flex: 1, padding: 13 }}
+            onClick={() => onAddToTank({ id: "zoa:" + z.id, name: z.name, cat: "Soft", kind: "Coral" })}>
+            <Plus size={16} /> Add to tank
+          </button>
+          <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={getTips} disabled={busy}>
+            <Bot size={16} /> {busy ? "Asking…" : "Care tips"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- Reefpedia ---------------- */
 // Free species photos from Wikipedia's public API (CORS-open, no key, freely licensed).
 // Species photos are downloaded from Wikimedia Commons at BUILD time (scripts/fetch-images.mjs)
@@ -1416,28 +1647,32 @@ function SpeciesPhoto({ item, height, radius = 0 }) {
 
 const CAT_COLOR = { Fish: "#ff7a5c", SPS: "#2ee6c8", LPS: "#3fe3ff", Soft: "#b06cff", Invert: "#ffc24d", Pest: "#ff5d72" };
 
-function Library({ libCat, setLibCat, openItem, counts }) {
+function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
   const [q, setQ] = useState("");
+  const isZoa = libCat === "Zoa";
   const query = q.trim().toLowerCase();
   const shown = REEFPEDIA.filter((l) =>
     (libCat === "All" || l.cat === libCat) &&
     (!query || l.name.toLowerCase().includes(query) || l.sci.toLowerCase().includes(query) || l.blurb.toLowerCase().includes(query)));
   return (
     <div className="rb-fadein">
-      <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
-        <Search size={17} color="var(--muted)" />
-        <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }}
-          placeholder="Search 76 species, corals & pests…" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
+      {!isZoa && (
+        <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
+          <Search size={17} color="var(--muted)" />
+          <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }}
+            placeholder={`Search ${REEFPEDIA.length} species, corals & pests…`} value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      )}
       <div className="rb-tabs" style={{ marginTop: 14 }}>
-        {REEFPEDIA_CATS.map((c) => (
+        {[...REEFPEDIA_CATS, "Zoa"].map((c) => (
           <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => setLibCat(c)}>
-            {c === "Pest" ? "Pests & Disease" : c === "Soft" ? "Soft Coral" : c}
+            {c === "Pest" ? "Pests & Disease" : c === "Soft" ? "Soft Coral" : c === "Zoa" ? "🪸 Zoa Morphs" : c}
           </div>
         ))}
       </div>
-      {shown.length === 0 && <div className="rb-card rb-empty">Nothing matches “{q}”. Try a common name, a genus, or a symptom.</div>}
-      <div className="rb-mgrid">
+      {isZoa && <ZoaGuide onAddToTank={onAddToTank} />}
+      {!isZoa && shown.length === 0 && <div className="rb-card rb-empty">Nothing matches “{q}”. Try a common name, a genus, or a symptom.</div>}
+      {!isZoa && <div className="rb-mgrid">
         {shown.map((l) => (
           <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
             <div style={{ position: "relative" }}>
@@ -1463,7 +1698,7 @@ function Library({ libCat, setLibCat, openItem, counts }) {
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1483,7 +1718,7 @@ function PhotoCredit({ item }) {
   );
 }
 
-function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage }) {
+function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTank }) {
   const [keepers, setKeepers] = useState(null);
   useEffect(() => {
     let alive = true;
@@ -1577,9 +1812,16 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage }) {
           </>
         )}
         {tips && <div className="rb-card" style={{ padding: 14, marginBottom: 14, fontSize: 13.5, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{tips}</div>}
-        <button className="rb-btn violet" style={{ width: "100%", padding: 13 }} onClick={getTips} disabled={busy}>
-          <Bot size={16} /> {busy ? "Asking DeepDive…" : isPest ? "Get an eradication plan" : "Care tips from DeepDive"}
-        </button>
+        <div style={{ display: "flex", gap: 10 }}>
+          {!isPest && (
+            <button className="rb-btn" style={{ flex: 1, padding: 13 }} onClick={() => onAddToTank(item)}>
+              <Plus size={16} /> Add to tank
+            </button>
+          )}
+          <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={getTips} disabled={busy}>
+            <Bot size={16} /> {busy ? "Asking…" : isPest ? "Eradication plan" : "Care tips"}
+          </button>
+        </div>
         <PhotoCredit item={item} />
       </div>
     </div>
