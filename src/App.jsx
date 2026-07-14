@@ -124,7 +124,13 @@ const STYLES = `
 /* tasks */
 .rb-task{display:flex;align-items:center;gap:12px;padding:13px 14px;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;}
 .rb-task:last-child{border-bottom:none;}
-.rb-check{width:24px;height:24px;border-radius:8px;border:2px solid var(--brd-2);flex:none;display:grid;place-items:center;color:var(--bg-0);transition:.15s;}
+.rb-check{width:26px;height:26px;border-radius:9px;border:2px solid var(--brd-2);flex:none;display:grid;place-items:center;
+  color:var(--bg-0);transition:.18s;cursor:pointer;}
+.rb-check:hover{border-color:var(--good);}
+.rb-check.done{background:var(--good);border-color:var(--good);animation:rbPop .4s ease;}
+@keyframes rbPop{0%{transform:scale(1)}45%{transform:scale(1.25)}100%{transform:scale(1)}}
+.rb-task.completing{animation:rbSlideOut .45s ease forwards;}
+@keyframes rbSlideOut{60%{opacity:1}100%{opacity:0;transform:translateX(14px)}}
 .rb-task .nm{font-weight:600;font-size:14px;}
 .rb-task .when{font-size:12px;margin-top:1px;}
 .due-over{color:var(--bad)}.due-soon{color:var(--warn)}.due-ok{color:var(--muted)}
@@ -346,11 +352,15 @@ function statusOf(p, v) {
   return "good";
 }
 const sclass = { good: "s-good", warn: "s-warn", bad: "s-bad" };
+function startOfDay(ts) { const d = new Date(ts); d.setHours(0, 0, 0, 0); return d.getTime(); }
+/** Whole calendar days from today until the due date. 0 = today, -1 = yesterday, 1 = tomorrow. */
+function daysUntil(due) { return Math.round((startOfDay(due) - startOfDay(Date.now())) / dayMs); }
 function dueLabel(due) {
-  const diff = due - Date.now();
-  if (diff < -dayMs / 2) return { t: "Overdue", c: "due-over" };
-  if (diff < dayMs) return { t: "Due today", c: "due-soon" };
-  if (diff < 2 * dayMs) return { t: "Due tomorrow", c: "due-soon" };
+  const d = daysUntil(due);
+  if (d < -1) return { t: `Overdue by ${-d} days`, c: "due-over" };
+  if (d === -1) return { t: "Overdue by 1 day", c: "due-over" };
+  if (d === 0) return { t: "Due today", c: "due-soon" };
+  if (d === 1) return { t: "Due tomorrow", c: "due-ok" };
   return { t: "Due " + fmtDate(due), c: "due-ok" };
 }
 const everyMs = { Daily: dayMs, "Every 2 days": 2 * dayMs, "Every 3 days": 3 * dayMs, Weekly: 7 * dayMs,
@@ -1454,11 +1464,20 @@ function Shop({ allListings, cat, setCat }) {
 function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }) {
   const [edit, setEdit] = useState(null);      // task being edited, or "new"
   const [aiOpen, setAiOpen] = useState(false);
+  const [doneIds, setDoneIds] = useState({});
 
   const sorted = [...state.tasks].sort((a, b) => a.due - b.due);
-  const overdue = sorted.filter((t) => t.due - Date.now() < -dayMs / 2);
-  const soon = sorted.filter((t) => { const d = t.due - Date.now(); return d >= -dayMs / 2 && d < 2 * dayMs; });
-  const later = sorted.filter((t) => t.due - Date.now() >= 2 * dayMs);
+  const overdue = sorted.filter((t) => daysUntil(t.due) < 0);
+  const soon = sorted.filter((t) => daysUntil(t.due) === 0);
+  const later = sorted.filter((t) => daysUntil(t.due) > 0);
+
+  const done = (t) => {
+    setDoneIds((d) => ({ ...d, [t.id]: true }));           // instant visual confirmation
+    setTimeout(() => {
+      completeTask(t.id);                                   // then reschedule/remove
+      setDoneIds((d) => { const n = { ...d }; delete n[t.id]; return n; });
+    }, 450);
+  };
 
   const Group = ({ title, items, color }) => items.length === 0 ? null : (
     <>
@@ -1466,10 +1485,11 @@ function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, s
       <div className="rb-card">
         {items.map((t) => {
           const d = dueLabel(t.due);
+          const isDone = !!doneIds[t.id];
           return (
-            <div key={t.id} className="rb-task" style={{ cursor: "default" }}>
-              <div className="rb-check" onClick={() => completeTask(t.id)} style={{ cursor: "pointer" }} title="Complete">
-                <Check size={15} style={{ opacity: 0 }} />
+            <div key={t.id} className={"rb-task" + (isDone ? " completing" : "")} style={{ cursor: "default" }}>
+              <div className={"rb-check" + (isDone ? " done" : "")} onClick={() => !isDone && done(t)} title="Complete">
+                <Check size={15} style={{ opacity: isDone ? 1 : 0 }} />
               </div>
               <div style={{ flex: 1, cursor: "pointer" }} onClick={() => setEdit(t)}>
                 <div className="nm">{t.name}</div>
@@ -1510,8 +1530,18 @@ function Tasks({ state, latest, completeTask, addTask, updateTask, deleteTask, s
         </div>
       )}
 
+      {state.tasks.length > 0 && overdue.length === 0 && soon.length === 0 && (
+        <div className="rb-card" style={{ marginTop: 14, padding: "22px 20px", textAlign: "center" }}>
+          <Check size={26} color="var(--good)" />
+          <div style={{ marginTop: 8, fontWeight: 600 }}>All caught up on {state.tank.name}</div>
+          <div style={{ marginTop: 4, fontSize: 13, color: "var(--muted)" }}>
+            Next up {fmtDate(later[0].due)} — nothing due today.
+          </div>
+        </div>
+      )}
+
       <Group title="Overdue" items={overdue} color="var(--bad)" />
-      <Group title="Due now" items={soon} color="var(--warn)" />
+      <Group title="Due today" items={soon} color="var(--warn)" />
       <Group title="Coming up" items={later} color="var(--aqua)" />
 
       {edit && (
