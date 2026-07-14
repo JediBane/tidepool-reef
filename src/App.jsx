@@ -545,7 +545,7 @@ function AuthScreen() {
 /* ======================================================================= */
 export default function TidepoolReef() {
   const [state, setState] = useState(null);
-  const [view, setView] = useState("feed");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
+  const [view, setView] = useState("tank");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
   const [drawer, setDrawer] = useState(false);
   const [sel, setSel] = useState("alk");
   const [cat, setCat] = useState("All");
@@ -629,10 +629,10 @@ export default function TidepoolReef() {
     else await supabase.from("post_likes").insert({ post_id: id, profile_id: state.uid });
   };
 
-  const TITLES = { feed: "Feed", library: "Library", shop: "Shop", tasks: "Tasks", profile: "My Profile",
-    params: "Parameter Tracker", tanklog: "Tank Log", reefid: "Reef ID", deepdive: "Tidepool DeepDive",
+  const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
+    library: "Library", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
     notifications: "Notifications", messages: "Messages", purchases: "Purchases", seller: "Seller Hub", settings: "Settings" };
-  const isTab = ["feed", "library", "shop", "tasks", "profile"].includes(view);
+  const isTab = ["tank", "log", "deepdive", "community", "profile"].includes(view);
   const taskCount = state.tasks.filter((t) => t.due - Date.now() < dayMs).length;
 
   const go = (v) => { setView(v); setDrawer(false); };
@@ -646,21 +646,21 @@ export default function TidepoolReef() {
         <div className="rb-top">
           {isTab
             ? <div className="rb-iconbtn" onClick={() => setDrawer(true)}><Menu size={20} /></div>
-            : <div className="rb-iconbtn" onClick={() => go("feed")}><ChevronLeft size={20} /></div>}
+            : <div className="rb-iconbtn" onClick={() => go("tank")}><ChevronLeft size={20} /></div>}
           {isTab ? <ReefLogo /> : <div className="rb-title" style={{ flex: 1, textAlign: "center" }}>{TITLES[view]}</div>}
           <div className="rb-avbtn" onClick={() => go("profile")}><CoralAvatar size={42} /><span className="rb-avdot" /></div>
         </div>
 
         {/* views */}
-        {view === "feed" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
+        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet }} />}
+        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry }} />}
+        {view === "deepdive" && <DeepDive {...{ state, latest, issues }} />}
+        {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost }} />}
+        {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
         {view === "tasks" && <Tasks {...{ state, completeTask }} />}
-        {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
-        {view === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} />}
-        {view === "tanklog" && <TankLog {...{ state, addLogEntry }} />}
         {view === "reefid" && <ReefID />}
-        {view === "deepdive" && <DeepDive {...{ state, latest, issues }} />}
         {view === "notifications" && <Notifications />}
         {view === "messages" && <Messages />}
         {view === "purchases" && <Purchases />}
@@ -669,15 +669,15 @@ export default function TidepoolReef() {
       </div>
 
       {/* contextual FAB */}
-      {view === "params" && <button className="rb-fab" onClick={() => setSheet("log")}><Beaker size={24} /></button>}
+      {view === "log" && <button className="rb-fab" onClick={() => setSheet("log")}><Beaker size={24} /></button>}
       {(view === "shop" || view === "seller") && <button className="rb-fab" onClick={() => setSheet("sell")}><Tag size={22} /></button>}
 
       {/* bottom nav */}
       <nav className="rb-nav">
-        {[["feed", Newspaper, "Feed"], ["library", BookOpen, "Library"], ["shop", Store, "Shop"], ["tasks", ListChecks, "Tasks"], ["profile", User, "Profile"]]
+        {[["tank", Waves, "Tank"], ["log", FlaskConical, "Log"], ["deepdive", Bot, "DeepDive"], ["community", Newspaper, "Community"], ["profile", User, "Profile"]]
           .map(([k, Icon, lbl]) => (
             <div key={k} className={"rb-navi" + (view === k ? " on" : "")} onClick={() => go(k)}>
-              <div style={{ position: "relative" }}><Icon size={20} />{k === "tasks" && taskCount > 0 && <span className="rb-navbadge">{taskCount}</span>}</div>
+              <div style={{ position: "relative" }}><Icon size={20} />{k === "tank" && taskCount > 0 && <span className="rb-navbadge">{taskCount}</span>}</div>
               <span>{lbl}</span>
             </div>
           ))}
@@ -696,11 +696,11 @@ export default function TidepoolReef() {
             </div>
             <div className="rb-mdiv" />
             {[
-              ["params", FlaskConical, "Parameter Tracker"],
-              ["tanklog", Notebook, "Tank Log"],
-              ["reefid", Camera, "Reef ID"],
-              ["deepdive", Bot, "Tidepool DeepDive", "dot"],
-              ["notifications", Bell, "Notifications", "47"],
+              ["library", BookOpen, "Species Library"],
+              ["shop", Store, "Shop"],
+              ["tasks", ListChecks, "Maintenance Tasks", taskCount > 0 ? String(taskCount) : null],
+              ["reefid", Camera, "Reef ID", "dot"],
+              ["notifications", Bell, "Notifications"],
               ["messages", MessageCircle, "Messages"],
               ["purchases", Receipt, "Purchases"],
               ["seller", Store, "Seller Hub"],
@@ -722,6 +722,128 @@ export default function TidepoolReef() {
       {sheet === "libDetail" && libItem && <LibDetail item={libItem} onClose={() => setSheet(null)} />}
 
       {toast > 0 && <div className="rb-toast"><span className="rb-pearl" />+{toast} Pearls</div>}
+    </div>
+  );
+}
+
+/* ---------------- Tank (home) ---------------- */
+function TankHome({ state, latest, issues, go, setSheet }) {
+  const t = state.tank;
+  const health = latest
+    ? Math.round((PARAMS.reduce((a, p) => a + (statusOf(p, latest[p.key]) === "good" ? 1 : statusOf(p, latest[p.key]) === "warn" ? 0.6 : 0.2), 0) / PARAMS.length) * 100)
+    : null;
+  const nextTasks = [...state.tasks].sort((a, b) => a.due - b.due).slice(0, 2);
+  const lastLog = state.log[0];
+  return (
+    <div className="rb-fadein">
+      <div className="rb-tankhero" style={{ marginTop: 4, height: 190 }}>
+        <div className="light" /><div className="rock" />
+        <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
+        <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
+        <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
+        <div style={{ position: "absolute", left: 16, bottom: 14 }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24, letterSpacing: "-.5px" }}>{t.name}</div>
+          <div style={{ color: "var(--muted)", fontSize: 12.5 }}>{t.model} · {t.volume} gal · est. {t.since}</div>
+        </div>
+        <div style={{ position: "absolute", right: 16, bottom: 14, textAlign: "right" }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 34, lineHeight: 1, background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
+            {health == null ? "—" : health}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 1 }}>HEALTH</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <button className="rb-btn" style={{ flex: 1, padding: 13 }} onClick={() => setSheet("log")}><Beaker size={16} /> Log test</button>
+        <button className="rb-btn ghost" style={{ flex: 1, padding: 13 }} onClick={() => go("log")}><Notebook size={16} /> Journal</button>
+        <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={() => go("deepdive")}><Bot size={16} /> Ask AI</button>
+      </div>
+
+      <div className="rb-h2"><FlaskConical size={16} color="var(--aqua)" /> Latest parameters
+        <small>{latest ? fmtDate(latest.date) : "none yet"}</small></div>
+      {!latest ? (
+        <div className="rb-card rb-empty" style={{ padding: "26px 18px" }}>
+          No readings yet — tap <b style={{ color: "var(--text)" }}>Log test</b> above to start tracking. Charts, health, and AI diagnosis all build from your readings.
+        </div>
+      ) : (
+        <div className="rb-hscroll">
+          {PARAMS.map((p) => {
+            const st = statusOf(p, latest[p.key]);
+            return (
+              <div key={p.key} className="rb-card" style={{ flex: "none", width: 108, padding: "11px 12px", cursor: "pointer", scrollSnapAlign: "start" }} onClick={() => go("log")}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "var(--muted)" }}>{p.label}</span><span className={"rb-sdot " + sclass[st]} />
+                </div>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 700, fontSize: 18, marginTop: 5 }}>
+                  {latest[p.key]}<span style={{ fontSize: 10.5, color: "var(--muted)", fontWeight: 500, marginLeft: 2 }}>{p.unit}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {issues.length > 0 && (<>
+        <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Needs attention <small>{issues.length} flag{issues.length > 1 ? "s" : ""}</small></div>
+        <div className="rb-card">
+          {issues.map((p) => {
+            const st = statusOf(p, latest[p.key]);
+            return (
+              <div key={p.key} className="rb-li" onClick={() => go("log")} style={{ cursor: "pointer" }}>
+                <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
+                <div><div className="nm">{p.label} drifting</div><div className="sub">{latest[p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+                <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
+              </div>
+            );
+          })}
+        </div>
+      </>)}
+
+      <div className="rb-cols2">
+        <div>
+          <div className="rb-h2"><Calendar size={16} color="var(--aqua)" /> Up next <small onClick={() => go("tasks")} style={{ cursor: "pointer" }}>all tasks ›</small></div>
+          <div className="rb-card">
+            {nextTasks.map((tk) => {
+              const d = dueLabel(tk.due);
+              return (
+                <div key={tk.id} className="rb-li" onClick={() => go("tasks")} style={{ cursor: "pointer" }}>
+                  <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--aqua),var(--teal))" }}><Clock size={20} color="#04111a" /></div>
+                  <div><div className="nm">{tk.name}</div><div className={"sub " + d.c}>{d.t} · {tk.every}</div></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div>
+          <div className="rb-h2"><Notebook size={16} color="var(--teal)" /> Last journal entry <small onClick={() => go("log")} style={{ cursor: "pointer" }}>open log ›</small></div>
+          <div className="rb-card">
+            {!lastLog ? <div className="rb-empty">No entries yet — water changes, additions, and observations live here.</div> : (
+              <div className="rb-li" style={{ alignItems: "flex-start" }}>
+                <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--teal),#0b2b3d)" }}><Notebook size={18} color="#04111a" /></div>
+                <div><div className="nm">{lastLog.type} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {fmtDate(lastLog.date)}</span></div>
+                  <div className="sub" style={{ lineHeight: 1.45 }}>{lastLog.note}</div></div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Log (parameters + journal + livestock) ---------------- */
+function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry }) {
+  const [tab, setTab] = useState("params");
+  return (
+    <div className="rb-fadein">
+      <div className="rb-tabs" style={{ marginTop: 4 }}>
+        {[["params", "Parameters"], ["journal", "Journal"], ["livestock", "Livestock"]].map(([k, lbl]) => (
+          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{lbl}</div>
+        ))}
+      </div>
+      {tab === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} hideLivestock />}
+      {tab === "journal" && <TankLog {...{ state, addLogEntry }} />}
+      {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} livestockOnly />}
     </div>
   );
 }
@@ -753,7 +875,7 @@ function Profile({ state, fish, corals, issues, go }) {
 
       <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
         <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
-        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("feed")}><PenSquare size={15} /> Create Post</button>
+        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("community")}><PenSquare size={15} /> Create Post</button>
       </div>
       </div>
 
@@ -765,9 +887,9 @@ function Profile({ state, fish, corals, issues, go }) {
         <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
         <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
         <div className="acts">
-          <div onClick={() => go("tanklog")}><Notebook size={17} color="var(--text)" /></div>
-          <div onClick={() => go("params")}><FlaskConical size={17} color="var(--text)" /></div>
-          <div onClick={() => go("feed")}><PenSquare size={17} color="var(--text)" /></div>
+          <div onClick={() => go("log")}><Notebook size={17} color="var(--text)" /></div>
+          <div onClick={() => go("log")}><FlaskConical size={17} color="var(--text)" /></div>
+          <div onClick={() => go("community")}><PenSquare size={17} color="var(--text)" /></div>
         </div>
       </div>
 
@@ -777,7 +899,7 @@ function Profile({ state, fish, corals, issues, go }) {
         {issues.map((p) => {
           const st = statusOf(p, state.history[state.history.length - 1][p.key]);
           return (
-            <div key={p.key} className="rb-li" onClick={() => go("params")}>
+            <div key={p.key} className="rb-li" onClick={() => go("log")}>
               <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
               <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
               <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
@@ -990,7 +1112,7 @@ function Tasks({ state, completeTask }) {
 }
 
 /* ---------------- Tracker ---------------- */
-function Tracker({ state, latest, sel, setSel, addLivestock }) {
+function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, livestockOnly }) {
   const [lsName, setLsName] = useState("");
   const [lsKind, setLsKind] = useState("Coral");
   const p = PARAMS.find((x) => x.key === sel);
@@ -999,6 +1121,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock }) {
   const delta = latest ? +(latest[sel] - prev).toFixed(p.dec) : 0;
   return (
     <div className="rb-fadein">
+      {!livestockOnly && (<>
       <div className="rb-h2" style={{ marginTop: 6 }}><FlaskConical size={16} color="var(--aqua)" /> Parameters <small>tap to chart</small></div>
       {!latest && (
         <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
@@ -1040,6 +1163,8 @@ function Tracker({ state, latest, sel, setSel, addLivestock }) {
         </ResponsiveContainer>
       </div>
       </div>)}
+      </>)}
+      {!hideLivestock && (<>
       <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{state.livestock.length} in tank</small></div>
       <div className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
         <div className="rb-tabs" style={{ margin: "0 0 10px" }}>
@@ -1063,6 +1188,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock }) {
           </div>
         ))}
       </div>
+      </>)}
     </div>
   );
 }
