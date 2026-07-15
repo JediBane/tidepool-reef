@@ -482,21 +482,13 @@ async function fetchTankChildren(tankId) {
 async function fetchAll(uid) {
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", uid).single();
   let { data: tanksAll } = await supabase.from("tanks").select("*").eq("owner_id", uid).order("created_at");
-  if (!tanksAll || !tanksAll.length) {
-    const { data: created, error } = await supabase.from("tanks")
-      .insert({ owner_id: uid, name: (profile && profile.display_name) || "My Reef", model: "IM NuVo Fusion 15", volume_gal: 15, since: "2025" })
-      .select().single();
-    if (error) throw error;
-    await supabase.from("tasks").insert(DEFAULT_TASKS.map((t) => ({
-      tank_id: created.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
-    })));
-    tanksAll = [created];
-  }
+  tanksAll = tanksAll || [];   // zero tanks = fresh account → onboarding handles it
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
-  const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
+  const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0] || null;
   const myTankIds = tanksAll.map((t) => t.id);
+  const EMPTY_CHILDREN = { history: [], livestock: [], tasks: [], log: [] };
   const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock] = await Promise.all([
-    fetchTankChildren(active.id),
+    active ? fetchTankChildren(active.id) : Promise.resolve(EMPTY_CHILDREN),
     supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
     supabase.from("post_likes").select("post_id"),
@@ -504,7 +496,7 @@ async function fetchAll(uid) {
     supabase.from("post_comments").select("post_id"),
     fetchSpeciesCounts(),
     supabase.from("profiles").select("id, handle, display_name"),
-    supabase.from("livestock").select("kind, species_id, tank_id").in("tank_id", myTankIds),
+    myTankIds.length ? supabase.from("livestock").select("kind, species_id, tank_id").in("tank_id", myTankIds) : Promise.resolve({ data: [] }),
   ]);
   // Surface failures instead of silently rendering an empty feed.
   [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf], ["livestock", allStock]].forEach(([label, r]) => {
@@ -535,8 +527,8 @@ async function fetchAll(uid) {
       linked: stock.filter((l) => l.species_id).length,
       readings: state_history_total,
     },
-    tankId: active.id,
-    tank: shapeTank(active),
+    tankId: active ? active.id : null,
+    tank: active ? shapeTank(active) : null,
     ...children,
     listings: (mr.data || []).map((r, i) => ({
       id: r.id, cat: r.category, title: r.title, price: Number(r.price_usd),
@@ -698,6 +690,121 @@ export default function TidepoolReefApp() {
   return <ErrorBoundary><TidepoolReef /></ErrorBoundary>;
 }
 
+/* ---------------- First-run onboarding ---------------- */
+const TANK_PRESETS = [
+  ["IM NuVo Fusion 15", 15], ["Biocube 16", 16], ["Biocube 32", 32],
+  ["40 Gallon Breeder", 40], ["Red Sea Reefer 250", 65], ["Red Sea Reefer 425 XL", 120],
+];
+function Onboarding({ profile, onDone }) {
+  const [step, setStep] = useState(0);
+  const [name, setName] = useState("");
+  const [model, setModel] = useState("");
+  const [gal, setGal] = useState("");
+  const [since, setSince] = useState(String(new Date().getFullYear()));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  const create = async () => {
+    setBusy(true); setErr("");
+    const { data: created, error } = await supabase.from("tanks")
+      .insert({ owner_id: profile.id, name: name.trim() || "My Reef", model: model.trim() || "Custom", volume_gal: Number(gal) || null, since })
+      .select().single();
+    if (error) { setErr(error.message); setBusy(false); return; }
+    await supabase.from("tasks").insert(DEFAULT_TASKS.map((t) => ({
+      tank_id: created.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
+    })));
+    try { localStorage.setItem("tr:tank", created.id); } catch (e) {}
+    await onDone();
+  };
+
+  const years = []; for (let y = new Date().getFullYear(); y >= 2000; y--) years.push(String(y));
+  const Dots = () => (
+    <div style={{ display: "flex", gap: 6, justifyContent: "center", margin: "18px 0 0" }}>
+      {[0, 1, 2, 3].map((i) => <div key={i} style={{ width: 7, height: 7, borderRadius: 7, background: i <= step ? "var(--aqua)" : "rgba(255,255,255,.15)" }} />)}
+    </div>
+  );
+
+  return (
+    <div className="rb-root" style={{ display: "grid", placeItems: "center", padding: 20 }}>
+      <style>{STYLES}</style>
+      <div style={{ maxWidth: 430, width: "100%" }}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24 }}>
+            <span style={{ background: "linear-gradient(90deg,#3f9bff,#2ee6c8)", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>Tidepool</span> <span style={{ color: "var(--aqua)" }}>Reef</span>
+          </div>
+        </div>
+        <div className="rb-card" style={{ padding: 26 }}>
+
+          {step === 0 && (<div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 44 }}>🪸</div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21, marginTop: 10 }}>Welcome, @{profile.handle}!</div>
+            <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.6, marginTop: 10 }}>
+              Your reef journal starts here — track parameters, log livestock, and get answers when something looks off.
+              <br /><br />Would you like to set up your first tank?
+            </div>
+            <button className="rb-btn" style={{ width: "100%", marginTop: 20, padding: 14 }} onClick={() => setStep(1)}>
+              <Waves size={16} /> Set up my first tank
+            </button>
+            <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 12, cursor: "pointer" }} onClick={() => supabase.auth.signOut()}>Sign out</div>
+          </div>)}
+
+          {step === 1 && (<div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 18 }}>Name your tank</div>
+            <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 5 }}>Whatever you call it at home — you can change this anytime.</div>
+            <input className="rb-input" autoFocus placeholder="e.g. The Reef, Living Room Lagoon…" value={name}
+              onChange={(e) => setName(e.target.value)} style={{ width: "100%", marginTop: 14 }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              {["My Reef", "The Lagoon", "Coral Corner"].map((s) => (
+                <div key={s} className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => setName(s)}>{s}</div>
+              ))}
+            </div>
+            <button className="rb-btn" style={{ width: "100%", marginTop: 18 }} disabled={!name.trim()} onClick={() => setStep(2)}>Next</button>
+          </div>)}
+
+          {step === 2 && (<div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 18 }}>What kind of tank?</div>
+            <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 5 }}>Pick a common setup or type your own.</div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+              {TANK_PRESETS.map(([m, g]) => (
+                <div key={m} className={"rb-chip" + (model === m ? " on" : "")} style={{ fontSize: 11.5 }}
+                  onClick={() => { setModel(m); setGal(String(g)); }}>{m}</div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+              <input className="rb-input" placeholder="Model / brand" value={model} onChange={(e) => setModel(e.target.value)} style={{ flex: 2 }} />
+              <input className="rb-input" placeholder="Gallons" type="number" inputMode="numeric" value={gal} onChange={(e) => setGal(e.target.value)} style={{ flex: 1 }} />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+              <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => setStep(1)}>Back</button>
+              <button className="rb-btn" style={{ flex: 2 }} disabled={!model.trim()} onClick={() => setStep(3)}>Next</button>
+            </div>
+          </div>)}
+
+          {step === 3 && (<div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 18 }}>Running since?</div>
+            <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 5 }}>Roughly when did this tank start? (Helps track maturity.)</div>
+            <select className="rb-input" value={since} onChange={(e) => setSince(e.target.value)} style={{ width: "100%", marginTop: 14 }}>
+              {years.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <div className="rb-card" style={{ padding: 14, marginTop: 16, background: "var(--bg-2)", fontSize: 13, color: "var(--muted)" }}>
+              <b style={{ color: "var(--text)" }}>{name || "My Reef"}</b><br />
+              {model || "Custom"}{gal ? ` · ${gal} gal` : ""} · since {since}<br />
+              <span style={{ fontSize: 11.5, color: "var(--muted-2)" }}>We'll add a starter maintenance schedule you can edit.</span>
+            </div>
+            {err && <div style={{ color: "var(--bad)", fontSize: 12.5, marginTop: 10 }}>{err}</div>}
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="rb-btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => setStep(2)}>Back</button>
+              <button className="rb-btn" style={{ flex: 2 }} disabled={busy} onClick={create}>{busy ? "Creating…" : "Create my tank 🎉"}</button>
+            </div>
+          </div>)}
+
+          <Dots />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Pull-to-refresh — listens on the app's own scroll container (.rb-root) so iOS Safari's
    native bounce/PTR can't hijack the gesture. Engages only at scrollTop 0. */
 function usePullToRefresh(onRefresh, refreshing, ready) {
@@ -829,6 +936,7 @@ function TidepoolReef() {
     return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
       <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
   }
+  if (!state.tanks.length) return <Onboarding profile={state.profile} onDone={refresh} />;
 
   const allListings = state.listings;
   const allPosts = state.posts;
