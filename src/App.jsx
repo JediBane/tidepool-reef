@@ -1174,6 +1174,25 @@ function TidepoolReef() {
     award(2);
     return { ...data, handle: state.profile.handle };
   };
+  const updateProfile = async (fields) => {
+    const clean = {};
+    if (fields.display_name != null) clean.display_name = fields.display_name.trim().slice(0, 40);
+    if (fields.handle != null) clean.handle = fields.handle.trim().replace(/[^a-zA-Z0-9_]/g, "").slice(0, 20);
+    if (fields.location != null) clean.location = fields.location.trim().slice(0, 60);
+    if (fields.reefing_since != null) clean.reefing_since = parseInt(fields.reefing_since, 10) || null;
+    if (clean.handle === "") { alert("Handle can't be empty."); return false; }
+    const prev = state.profile;
+    setState((s) => ({ ...s, profile: { ...s.profile, ...clean } }));
+    const { error } = await supabase.from("profiles").update(clean).eq("id", state.uid);
+    if (error) {
+      console.error("updateProfile failed:", error.message);
+      setState((s) => ({ ...s, profile: prev }));
+      if (error.code === "23505" || /duplicate|unique/i.test(error.message)) alert("That handle is already taken — try another.");
+      else alert("Couldn't save your profile — try again.");
+      return false;
+    }
+    return true;
+  };
   const setTankSharing = async (id, field, value) => {
     const col = field === "params" ? "share_params" : "is_public";
     setState((s) => ({
@@ -1275,7 +1294,7 @@ function TidepoolReef() {
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
         {view === "admin" && <AdminPanel state={state} />}
-        {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
+        {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, updateProfile, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat, uid: state.uid, onMessage: (who, prefill) => { setMsgTo({ ...who, prefill }); setSheet("message"); } }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
@@ -1909,7 +1928,8 @@ function computeAchievements(state, derived) {
   return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived) }));
 }
 
-function Profile({ state, fish, corals, issues, go, myPosts, switchTank }) {
+function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateProfile }) {
+  const [editOpen, setEditOpen] = useState(false);
   const derived = { corals, fish, myPosts: myPosts.length };
   const achievements = computeAchievements(state, derived);
   const earned = achievements.filter((a) => a.earned);
@@ -1920,16 +1940,17 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank }) {
   return (
     <div className="rb-fadein">
       {/* Compact horizontal hero */}
-      <div className="rb-card" style={{ padding: 14, display: "flex", gap: 14, alignItems: "center", marginTop: 4 }}>
+      <div className="rb-card" style={{ padding: 14, display: "flex", gap: 14, alignItems: "center", marginTop: 4, position: "relative" }}>
         <div style={{ flex: "none" }}><CoralAvatar size={60} /></div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>{state.profile.display_name || state.profile.handle}</div>
-          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 1 }}>@{state.profile.handle} · {state.profile.location || "Florida, US"}</div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 1 }}>@{state.profile.handle}{state.profile.location ? " · " + state.profile.location : ""}</div>
           <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
             <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)", fontSize: 11 }}>Since {state.profile.reefing_since || state.tank.since}</span>
             <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)", fontSize: 11 }}><Award size={11} /> {earned.length} badges</span>
           </div>
         </div>
+        <div className="rb-iconbtn" style={{ position: "absolute", top: 12, right: 12, width: 34, height: 34 }} onClick={() => setEditOpen(true)} title="Edit profile"><PenSquare size={15} /></div>
       </div>
 
       {/* Stat bar */}
@@ -2007,6 +2028,48 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank }) {
         {issues.length === 0 && myPosts.length === 0 && (
           <div className="rb-empty" style={{ padding: "20px" }}>Nothing to report — <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => go("community")}>share a tank update</span>.</div>
         )}
+      </div>
+      {editOpen && <EditProfileSheet profile={state.profile} onClose={() => setEditOpen(false)} onSave={updateProfile} />}
+    </div>
+  );
+}
+
+function EditProfileSheet({ profile, onClose, onSave }) {
+  const [name, setName] = useState(profile.display_name || "");
+  const [handle, setHandle] = useState(profile.handle || "");
+  const [location, setLocation] = useState(profile.location || "");
+  const [since, setSince] = useState(profile.reefing_since || String(new Date().getFullYear()));
+  const [busy, setBusy] = useState(false);
+  const years = []; for (let y = new Date().getFullYear(); y >= 1990; y--) years.push(String(y));
+  const save = async () => {
+    setBusy(true);
+    const ok = await onSave({ display_name: name, handle, location, reefing_since: since });
+    setBusy(false);
+    if (ok) onClose();
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Edit profile</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div className="rb-field"><label>Display name</label>
+          <input className="rb-input" placeholder="How your name shows up" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} /></div>
+        <div className="rb-field"><label>Handle</label>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: "var(--muted)", fontSize: 15 }}>@</span>
+            <input className="rb-input" placeholder="username" value={handle} onChange={(e) => setHandle(e.target.value.replace(/[^a-zA-Z0-9_]/g, ""))} maxLength={20} style={{ flex: 1 }} />
+          </div>
+          <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 4 }}>Letters, numbers, and underscores. Must be unique.</div>
+        </div>
+        <div className="rb-field"><label>Location</label>
+          <input className="rb-input" placeholder="e.g. Tampa, FL" value={location} onChange={(e) => setLocation(e.target.value)} maxLength={60} /></div>
+        <div className="rb-field"><label>Reefing since</label>
+          <select className="rb-input" value={since} onChange={(e) => setSince(e.target.value)}>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={busy || !handle.trim()} onClick={save}>
+          <Check size={16} /> {busy ? "Saving…" : "Save profile"}
+        </button>
       </div>
     </div>
   );
