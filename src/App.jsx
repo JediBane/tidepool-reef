@@ -559,6 +559,27 @@ async function gateAI(kind) {
   return true;
 }
 
+/* Read + downscale a photo to ≤1600px JPEG (fits function payload; plenty for vision). */
+function readReefPhoto(f, cb) {
+  const url = URL.createObjectURL(f);
+  const im = new Image();
+  im.onload = () => {
+    const scale = Math.min(1, 1600 / Math.max(im.width, im.height));
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(im.width * scale); cv.height = Math.round(im.height * scale);
+    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+    const dataUrl = cv.toDataURL("image/jpeg", 0.85);
+    cb({ b64: dataUrl.split(",")[1], media: "image/jpeg", url: dataUrl });
+    URL.revokeObjectURL(url);
+  };
+  im.onerror = () => {
+    const reader = new FileReader();
+    reader.onload = () => { const s = reader.result; cb({ b64: s.split(",")[1], media: f.type || "image/jpeg", url: s }); };
+    reader.readAsDataURL(f);
+  };
+  im.src = url;
+}
+
 async function askReefAI(messages, system) {
   const res = await fetch("/api/chat", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -3241,25 +3262,9 @@ function ReefID({ profile, onUpgrade }) {
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    // Downscale to ≤1600px JPEG so big camera photos fit the function payload limit
-    const url = URL.createObjectURL(f);
-    const im = new Image();
-    im.onload = () => {
-      const scale = Math.min(1, 1600 / Math.max(im.width, im.height));
-      const cv = document.createElement("canvas");
-      cv.width = Math.round(im.width * scale); cv.height = Math.round(im.height * scale);
-      cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
-      const dataUrl = cv.toDataURL("image/jpeg", 0.85);
-      setImg({ b64: dataUrl.split(",")[1], media: "image/jpeg", url: dataUrl });
-      setResult(""); URL.revokeObjectURL(url);
-    };
-    im.onerror = () => { // fall back to raw file if decode fails
-      const reader = new FileReader();
-      reader.onload = () => { const s = reader.result; setImg({ b64: s.split(",")[1], media: f.type || "image/jpeg", url: s }); setResult(""); };
-      reader.readAsDataURL(f);
-    };
-    im.src = url;
+    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); });
   };
+
   const identify = async () => {
     if (!(await gateAI("reefid"))) return;
     if (!img) return; setBusy(true); setResult("");
@@ -3313,6 +3318,8 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [photo, setPhoto] = useState(null);   // {b64, media, url}
+  const fileRef = useRef(null);
   const scroller = useRef(null);
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; }, [msgs, busy]);
 
@@ -3325,13 +3332,30 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
     `Latest test results for ${t.name} — ${snapshot()} ` +
     `Livestock in ${t.name}: ${state.livestock.map((l) => l.name).join(", ") || "none logged"}. ` +
     "Answer questions about THIS tank using this context unless the user clearly asks about something else. " +
+    "If the user attaches a photo, analyze what is actually visible in it (species, condition, symptoms, pests, equipment) and connect it to their tank context and question. " +
     "Give practical, friendly, specific guidance. Keep answers short. Focus on what's drifting and 2-3 concrete actions. Never recommend dangerous dosing.";
 
   async function send(text, display) {
-    const history = [...msgs, { role: "user", content: display || text }];
+    const attach = photo;   // capture, then clear the composer immediately
+    setPhoto(null);
+    const question = text || "What can you tell me about this photo of my reef?";
+    // api: multimodal content when a photo rides along; display keeps the thumbnail
+    const api = attach
+      ? [{ type: "image", source: { type: "base64", media_type: attach.media, data: attach.b64 } }, { type: "text", text: question }]
+      : question;
+    const history = [...msgs, { role: "user", content: display || question, img: attach ? attach.url : null, api }];
     setMsgs(history); setInput(""); setBusy(true);
     try {
-      const apiMsgs = [...msgs.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: text }];
+      // Token control: only the 2 most recent photos travel to the API; older ones become a note.
+      let imgsSeen = 0;
+      const apiMsgs = [...history].reverse().map((m) => {
+        let c = m.api || m.content;
+        if (Array.isArray(c) && c.some((b) => b.type === "image")) {
+          imgsSeen += 1;
+          if (imgsSeen > 2) c = "[photo previously attached] " + (c.find((b) => b.type === "text") || {}).text;
+        }
+        return { role: m.role, content: c };
+      }).reverse();
       if (!(await gateAI("deepdive"))) { setBusy(false); return; }
       const reply = await askReefAI(apiMsgs, SYS);
       setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
@@ -3359,7 +3383,12 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
           <div className="rb-empty"><Bot size={28} color="var(--aqua)" style={{ opacity: .85 }} />
             <div style={{ marginTop: 10 }}>Ask anything about your reef, or run a full diagnosis from your latest test results.</div></div>
         )}
-        {msgs.map((m, i) => <div key={i} className={"rb-ai-msg " + (m.role === "user" ? "u" : "a")}>{m.content}</div>)}
+        {msgs.map((m, i) => (
+          <div key={i} className={"rb-ai-msg " + (m.role === "user" ? "u" : "a")}>
+            {m.img && <img src={m.img} alt="attached" style={{ display: "block", maxWidth: 180, borderRadius: 10, marginBottom: m.content ? 8 : 0 }} />}
+            {m.content}
+          </div>
+        ))}
         {busy && <div className="rb-ai-msg a"><div className="rb-typing"><i /><i /><i /></div></div>}
       </div>
       {msgs.length === 0 && (
@@ -3367,11 +3396,25 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
           <TrendingUp size={16} /> Diagnose {t.name}{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
         </button>
       )}
+      {photo && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, padding: "8px 10px",
+          background: "var(--bg-1)", border: "1px solid var(--brd-2)", borderRadius: 12 }}>
+          <img src={photo.url} alt="preview" style={{ width: 44, height: 44, objectFit: "cover", borderRadius: 8 }} />
+          <div style={{ flex: 1, fontSize: 12.5, color: "var(--muted)" }}>Photo attached — ask a question about it, or just hit send.</div>
+          <span style={{ color: "var(--bad)", fontWeight: 700, cursor: "pointer", padding: 6 }} onClick={() => setPhoto(null)}>✕</span>
+        </div>
+      )}
       <div className="rb-ai-row">
-        <input className="rb-input" placeholder="e.g. Why is my hammer receding?" value={input}
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
+          onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) readReefPhoto(f, setPhoto); e.target.value = ""; }} />
+        <button className="rb-btn ghost" style={{ flex: "none", padding: "0 13px" }} disabled={busy}
+          onClick={() => fileRef.current && fileRef.current.click()} title="Attach a photo">
+          <Camera size={17} color={photo ? "var(--aqua)" : "currentColor"} />
+        </button>
+        <input className="rb-input" placeholder={photo ? "What do you want to know about this photo?" : "e.g. Why is my hammer receding?"} value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && input.trim() && !busy) send(input.trim()); }} />
-        <button className="rb-btn" disabled={!input.trim() || busy} onClick={() => send(input.trim())}><Send size={16} /></button>
+          onKeyDown={(e) => { if (e.key === "Enter" && (input.trim() || photo) && !busy) send(input.trim()); }} />
+        <button className="rb-btn" disabled={(!input.trim() && !photo) || busy} onClick={() => send(input.trim())}><Send size={16} /></button>
       </div>
     </div>
   );
