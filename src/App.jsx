@@ -1109,6 +1109,33 @@ function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switch
 }
 
 /* ---------------- Profile ---------------- */
+/* ---------------- Achievements ---------------- */
+const ACHIEVEMENTS = [
+  { id: "first_tank",   icon: "🪣", name: "Wet Hands",        desc: "Set up your first tank",                tier: "bronze", check: (s) => s.tanks.length >= 1 },
+  { id: "multi_tank",   icon: "🏠", name: "Fish Room",         desc: "Run 3 or more tanks at once",           tier: "gold",   check: (s) => s.tanks.length >= 3 },
+  { id: "first_log",    icon: "🧪", name: "Testing Testing",   desc: "Log your first parameter reading",      tier: "bronze", check: (s) => s.history.length >= 1 },
+  { id: "log_50",       icon: "📈", name: "Data Diver",        desc: "Log 50 parameter readings",             tier: "silver", check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 50 },
+  { id: "log_100",      icon: "🔬", name: "Reef Scientist",    desc: "Log 100 parameter readings",            tier: "gold",   check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 100 },
+  { id: "stocked_10",   icon: "🐠", name: "Getting Crowded",   desc: "Add 10 livestock to your tanks",        tier: "bronze", check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 10 },
+  { id: "stocked_25",   icon: "🌊", name: "Living Reef",       desc: "Keep 25 livestock across your tanks",   tier: "silver", check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 25 },
+  { id: "coral_keeper", icon: "🪸", name: "Coral Gardener",    desc: "Keep 15 corals",                        tier: "silver", check: (s, d) => d.corals >= 15 },
+  { id: "first_post",   icon: "💬", name: "Say Hi",            desc: "Make your first community post",        tier: "bronze", check: (s, d) => d.myPosts >= 1 },
+  { id: "poster_10",    icon: "📣", name: "Reef Voice",        desc: "Make 10 community posts",               tier: "silver", check: (s, d) => d.myPosts >= 10 },
+  { id: "pearls_500",   icon: "🦪", name: "Pearl Collector",   desc: "Earn 500 Pearls",                       tier: "silver", check: (s) => (s.pearls || 0) >= 500 },
+  { id: "pearls_1000",  icon: "👑", name: "Pearl Hoarder",     desc: "Earn 1,000 Pearls",                     tier: "gold",   check: (s) => (s.pearls || 0) >= 1000 },
+  { id: "shared",       icon: "🔗", name: "Open Book",         desc: "Share a tank's parameters publicly",    tier: "bronze", check: (s) => s.tanks.some((t) => t.shareParams) },
+  { id: "reefpedia_20", icon: "📖", name: "Librarian",         desc: "Link 20 livestock to Reefpedia",        tier: "silver", check: (s) => (s.totals ? s.totals.linked : s.livestock.filter((l) => l.species_id).length) >= 20 },
+  { id: "veteran",      icon: "🎖️", name: "Founding Reefer",   desc: "One of the first on Tidepool Reef",     tier: "gold",   check: () => true },
+];
+const TIER_STYLE = {
+  bronze: { c: "#cd8b5f", bg: "rgba(205,139,95,.14)", bd: "rgba(205,139,95,.5)" },
+  silver: { c: "#c8d0d8", bg: "rgba(200,208,216,.14)", bd: "rgba(200,208,216,.5)" },
+  gold:   { c: "#ffd470", bg: "rgba(255,194,77,.16)", bd: "rgba(255,194,77,.55)" },
+};
+function computeAchievements(state, derived) {
+  return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived) }));
+}
+
 function Profile({ state, fish, corals, issues, go, myPosts, switchTank, setSheet, setLibItem }) {
   const [tab, setTab] = useState("tanks");
   const derived = { corals, fish, myPosts: myPosts.length };
