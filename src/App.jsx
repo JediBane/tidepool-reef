@@ -490,7 +490,7 @@ async function fetchAll(uid) {
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0] || null;
   const myTankIds = tanksAll.map((t) => t.id);
   const EMPTY_CHILDREN = { history: [], livestock: [], tasks: [], log: [] };
-  const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock] = await Promise.all([
+  const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock, followRows] = await Promise.all([
     active ? fetchTankChildren(active.id) : Promise.resolve(EMPTY_CHILDREN),
     supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
@@ -500,6 +500,7 @@ async function fetchAll(uid) {
     fetchSpeciesCounts(),
     supabase.from("profiles").select("id, handle, display_name"),
     myTankIds.length ? supabase.from("livestock").select("kind, species_id, tank_id").in("tank_id", myTankIds) : Promise.resolve({ data: [] }),
+    supabase.from("follows").select("follower_id, followee_id"),
   ]);
   // Surface failures instead of silently rendering an empty feed.
   [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf], ["livestock", allStock]].forEach(([label, r]) => {
@@ -517,6 +518,12 @@ async function fetchAll(uid) {
   (allLikes.data || []).forEach((r) => (likeCounts[r.post_id] = (likeCounts[r.post_id] || 0) + 1));
   const commentCounts = {};
   (cm.data || []).forEach((r) => (commentCounts[r.post_id] = (commentCounts[r.post_id] || 0) + 1));
+  const following = {};
+  let followerCount = 0;
+  (followRows && followRows.data || []).forEach((f) => {
+    if (f.follower_id === uid) following[f.followee_id] = true;
+    if (f.followee_id === uid) followerCount += 1;
+  });
   return {
     uid,
     profile: profile || { handle: "reefer", display_name: "Reefer", pearls: 100, location: "Florida, United States" },
@@ -543,11 +550,14 @@ async function fetchAll(uid) {
       return {
         id: r.id, user: (a && (a.display_name || a.handle)) || "reefer",
         handle: (a && a.handle) || "reefer", tag: r.tag, tagc: TAG_COLOR[r.tag] || "#3fe3ff",
-        time: rel(r.created_at), body: r.body, img: r.img ? r.img.split(",") : null,
+        time: rel(r.created_at), body: r.body, img: r.img || null, authorId: r.author_id,
         likes: likeCounts[r.id] || 0, comments: commentCounts[r.id] || 0, mine: r.author_id === uid,
       };
     }),
     liked,
+    following,
+    followerCount,
+    followingCount: Object.keys(following).length,
   };
 }
 
@@ -582,6 +592,17 @@ function readReefPhoto(f, cb) {
     reader.readAsDataURL(f);
   };
   im.src = url;
+}
+
+/* Upload a downscaled photo to Supabase Storage, return its public URL. */
+async function uploadPhoto(file, uid) {
+  const photo = await new Promise((res) => readReefPhoto(file, res));
+  const bytes = Uint8Array.from(atob(photo.b64), (c) => c.charCodeAt(0));
+  const path = `${uid}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const { error } = await supabase.storage.from("photos").upload(path, bytes, { contentType: "image/jpeg", upsert: false });
+  if (error) { console.error("photo upload failed:", error.message); return null; }
+  const { data } = supabase.storage.from("photos").getPublicUrl(path);
+  return data ? data.publicUrl : null;
 }
 
 /* Reliably get the access token — retries if the session isn't hydrated yet
@@ -1145,9 +1166,9 @@ function TidepoolReef() {
     const { error } = await supabase.from("listings").delete().eq("id", id);
     if (error) { console.error("removeListing failed:", error.message); setState((s) => ({ ...s, listings: prev })); alert("Couldn't remove — try again."); }
   };
-  const addPost = async (body, tag = "Update") => {
+  const addPost = async (body, tag = "Update", img = null) => {
     const { data, error } = await supabase.from("posts")
-      .insert({ author_id: state.uid, tag, body }).select().single();
+      .insert({ author_id: state.uid, tag, body, img }).select().single();
     if (error) {
       console.error("[tidepool] post failed:", error.message);
       alert("Couldn't publish that post: " + error.message);
@@ -1155,9 +1176,29 @@ function TidepoolReef() {
     }
     setState((s) => ({ ...s, posts: [{
       id: data.id, user: s.profile.display_name || s.profile.handle, handle: s.profile.handle,
-      tag, tagc: TAG_COLOR[tag] || "#3fe3ff", time: "now", body, img: null, likes: 0, comments: 0, mine: true,
+      tag, tagc: TAG_COLOR[tag] || "#3fe3ff", time: "now", body, img, likes: 0, comments: 0, mine: true,
     }, ...s.posts] }));
     award(3);
+  };
+  const toggleFollow = async (targetId) => {
+    if (!targetId || targetId === state.uid) return;
+    const isFollowing = !!(state.following && state.following[targetId]);
+    setState((s) => {
+      const nf = { ...(s.following || {}) };
+      if (isFollowing) delete nf[targetId]; else nf[targetId] = true;
+      return { ...s, following: nf, followingCount: Object.keys(nf).length };
+    });
+    const { error } = isFollowing
+      ? await supabase.from("follows").delete().eq("follower_id", state.uid).eq("followee_id", targetId)
+      : await supabase.from("follows").insert({ follower_id: state.uid, followee_id: targetId });
+    if (error) {
+      console.error("toggleFollow failed:", error.message);
+      setState((s) => {
+        const nf = { ...(s.following || {}) };
+        if (isFollowing) nf[targetId] = true; else delete nf[targetId];
+        return { ...s, following: nf, followingCount: Object.keys(nf).length };
+      });
+    }
   };
   const toggleLike = async (id) => {
     const had = !!state.liked[id];
@@ -1304,7 +1345,7 @@ function TidepoolReef() {
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, removeLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
-        {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
+        {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
         {view === "admin" && <AdminPanel state={state} />}
         {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, updateProfile, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
@@ -1957,9 +1998,10 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateP
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>{state.profile.display_name || state.profile.handle}</div>
           <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 1 }}>@{state.profile.handle}{state.profile.location ? " · " + state.profile.location : ""}</div>
-          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
             <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)", fontSize: 11 }}>Since {state.profile.reefing_since || state.tank.since}</span>
             <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)", fontSize: 11 }}><Award size={11} /> {earned.length} badges</span>
+            <span style={{ fontSize: 12, color: "var(--muted)" }}><b style={{ color: "var(--text)" }}>{state.followerCount || 0}</b> followers · <b style={{ color: "var(--text)" }}>{state.followingCount || 0}</b> following</span>
           </div>
         </div>
         <div className="rb-iconbtn" style={{ position: "absolute", top: 12, right: 12, width: 34, height: 34 }} onClick={() => setEditOpen(true)} title="Edit profile"><PenSquare size={15} /></div>
@@ -2088,12 +2130,24 @@ function EditProfileSheet({ profile, onClose, onSave }) {
 }
 
 /* ---------------- Feed ---------------- */
-function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
+function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following, toggleFollow }) {
+  const [feedTab, setFeedTab] = useState("all");   // all | following
   const [draft, setDraft] = useState("");
   const [tag, setTag] = useState("Update");
   const [open, setOpen] = useState(null);
   const [tankView, setTankView] = useState(null);
+  const [photo, setPhoto] = useState(null);   // {url, file}
+  const [posting, setPosting] = useState(false);
+  const photoRef = useRef(null);
   const TAGS = ["Update", "Help", "Build", "Event"];
+  const submitPost = async () => {
+    if ((!draft.trim() && !photo) || posting) return;
+    setPosting(true);
+    let imgUrl = null;
+    if (photo) { imgUrl = await uploadPhoto(photo.file, uid); if (!imgUrl) { alert("Photo upload failed — posting without it."); } }
+    await addPost(draft.trim() || "(photo)", tag, imgUrl);
+    setDraft(""); setPhoto(null); setPosting(false);
+  };
   return (
     <>
     <div className="rb-fadein">
@@ -2103,15 +2157,25 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <textarea className="rb-input" rows={2} placeholder="Share a tank update or ask the reef…"
             value={draft} onChange={(e) => setDraft(e.target.value)} />
+          {photo && (
+            <div style={{ position: "relative", marginTop: 8, marginBottom: 2, width: "fit-content" }}>
+              <img src={photo.url} alt="" style={{ maxHeight: 120, borderRadius: 10 }} />
+              <span onClick={() => setPhoto(null)} style={{ position: "absolute", top: 6, right: 6, background: "rgba(3,8,12,.8)", color: "#fff", borderRadius: "50%", width: 22, height: 22, display: "grid", placeItems: "center", cursor: "pointer", fontWeight: 700 }}>✕</span>
+            </div>
+          )}
           <div className="rb-compose-bar">
             {TAGS.map((t) => (
               <div key={t} className={"rb-chip" + (tag === t ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setTag(t)}>
                 {t === "Help" ? "❓ Help" : t}
               </div>
             ))}
-            <button className="rb-btn" disabled={!draft.trim()}
-              onClick={() => { addPost(draft.trim(), tag); setDraft(""); }}>
-              <Send size={15} /> Post
+            <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) { const u = URL.createObjectURL(f); setPhoto({ url: u, file: f }); } e.target.value = ""; }} />
+            <div className="rb-chip" style={{ fontSize: 12, cursor: "pointer" }} onClick={() => photoRef.current && photoRef.current.click()}>
+              <Camera size={13} /> Photo
+            </div>
+            <button className="rb-btn" disabled={(!draft.trim() && !photo) || posting} onClick={submitPost}>
+              <Send size={15} /> {posting ? "Posting…" : "Post"}
             </button>
           </div>
           {tag === "Help" && (
@@ -2125,25 +2189,42 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
       <CommunityQuestions posts={allPosts} onOpen={setOpen} />
       <RecentParameters onOpenTank={setTankView} />
 
-      <div className="rb-sec"><h3>Latest Posts</h3><p>Everything from the community</p></div>
-      {allPosts.length === 0 && (
-        <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
-          Nothing here yet — post the first update.
+      <div className="rb-sec" style={{ display: "flex", alignItems: "center" }}>
+        <div style={{ flex: 1 }}><h3>Latest Posts</h3><p>{feedTab === "following" ? "From reefers you follow" : "Everything from the community"}</p></div>
+        <div className="rb-tabs" style={{ margin: 0 }}>
+          <div className={"rb-chip" + (feedTab === "all" ? " on" : "")} onClick={() => setFeedTab("all")}>All</div>
+          <div className={"rb-chip" + (feedTab === "following" ? " on" : "")} onClick={() => setFeedTab("following")}>Following</div>
         </div>
-      )}
-
+      </div>
+      {(() => {
+      const visible = feedTab === "following" ? allPosts.filter((p) => following[p.authorId] || p.mine) : allPosts;
+      if (visible.length === 0) return (
+        <div className="rb-card rb-empty" style={{ padding: "34px 20px" }}>
+          {feedTab === "following" ? "You're not following anyone yet — tap Follow on a post to build your feed." : "Nothing here yet — post the first update."}
+        </div>
+      );
+      return (
       <div className="rb-postgrid">
-        {allPosts.map((post) => {
+        {visible.map((post) => {
           const isLiked = liked[post.id];
           return (
             <div key={post.id} className="rb-card rb-post" style={{ cursor: "pointer" }} onClick={() => setOpen(post)}>
               <div className="rb-phead">
                 <div className="rb-pa" style={{ background: `linear-gradient(140deg,${post.tagc},var(--violet))` }}>{post.user[0]}</div>
-                <div><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
-                <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
+                <div style={{ flex: 1, minWidth: 0 }}><div className="u">{post.user}</div><div className="meta">@{post.handle} · {post.time}</div></div>
+                {!post.mine && post.authorId && (
+                  <span onClick={(e) => { e.stopPropagation(); toggleFollow(post.authorId); }}
+                    style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 20, cursor: "pointer", flex: "none",
+                      background: following[post.authorId] ? "transparent" : "rgba(63,227,255,.14)",
+                      color: following[post.authorId] ? "var(--muted)" : "var(--aqua)",
+                      border: `1px solid ${following[post.authorId] ? "var(--brd)" : "rgba(63,227,255,.4)"}` }}>
+                    {following[post.authorId] ? "Following" : "Follow"}
+                  </span>
+                )}
+                <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55`, flex: "none" }}>{post.tag}</span>
               </div>
               <div className="rb-pbody">{post.body}</div>
-              {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
+              {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ objectFit: "cover", width: "100%" }} />}
               <div className="rb-pacts">
                 <span className={isLiked ? "liked" : ""} onClick={(e) => { e.stopPropagation(); toggleLike(post.id); }}>
                   <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
@@ -2156,6 +2237,8 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid }) {
           );
         })}
       </div>
+      );
+      })()}
 
     </div>
 
@@ -2268,7 +2351,7 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
           <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
         </div>
         <div className="rb-pbody">{post.body}</div>
-        {post.img && <div className="rb-pimg" style={{ background: `linear-gradient(140deg,${post.img[0]},${post.img[1]})` }}><Waves size={36} /></div>}
+        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ objectFit: "cover", width: "100%" }} />}
         <div className="rb-pacts" style={{ marginBottom: 16 }}>
           <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
             <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
