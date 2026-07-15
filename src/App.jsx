@@ -581,8 +581,11 @@ function readReefPhoto(f, cb) {
 }
 
 async function askReefAI(messages, system) {
+  let token = null;
+  try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
   const res = await fetch("/api/chat", {
-    method: "POST", headers: { "Content-Type": "application/json" },
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
     body: JSON.stringify({ max_tokens: 1000, system, messages }),
   });
   const data = await res.json();
@@ -1370,7 +1373,10 @@ function UpgradeSheet({ open, onClose, profile }) {
   const buy = async (plan) => {
     setBusy(true);
     try {
-      const r = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" },
+      let token = null;
+      try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
+      const r = await fetch("/api/checkout", { method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
         body: JSON.stringify({ plan, uid: profile.id, handle: profile.handle }) });
       const d = await r.json();
       if (d && d.url) { window.location.href = d.url; return; }
