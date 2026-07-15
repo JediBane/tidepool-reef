@@ -1092,6 +1092,19 @@ function TidepoolReef() {
     }
     if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (s.livestock.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
   };
+  const removeLivestock = async (id) => {
+    const prev = state.livestock;
+    const gone = prev.find((l) => l.id === id);
+    setState((s) => ({ ...s, livestock: s.livestock.filter((l) => l.id !== id) }));
+    const { error } = await supabase.from("livestock").delete().eq("id", id);
+    if (error) {
+      console.error("removeLivestock failed:", error.message);
+      setState((s) => ({ ...s, livestock: prev }));
+      alert("Couldn't remove that — try again.");
+      return;
+    }
+    if (gone && gone.species_id) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [gone.species_id]: Math.max(0, (s.speciesCounts[gone.species_id] || 1) - 1) } }));
+  };
   const addLivestockTo = async (tankId, kind, name, speciesId) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
     const { error } = await supabase.from("livestock")
@@ -1177,6 +1190,32 @@ function TidepoolReef() {
     const children = await fetchTankChildren(id);
     setState((s) => ({ ...s, tankId: id, tank: s.tanks.find((t) => t.id === id) || s.tank, ...children }));
   };
+  const createTank = async ({ name, model, gal, since }) => {
+    const { data: created, error } = await supabase.from("tanks")
+      .insert({ owner_id: state.uid, name: name.trim() || "New Tank", model: (model || "").trim() || "Custom", volume_gal: Number(gal) || null, since: since || String(new Date().getFullYear()) })
+      .select().single();
+    if (error) { alert("Couldn't create tank — try again."); return; }
+    await supabase.from("tasks").insert(DEFAULT_TASKS.map((t) => ({
+      tank_id: created.id, name: t.name, every: t.every, due_at: new Date(Date.now() + t.offset).toISOString(),
+    })));
+    setState((s) => ({ ...s, tanks: [...s.tanks, shapeTank(created)] }));
+  };
+  const renameTank = async (id, name) => {
+    const nm = name.trim(); if (!nm) return;
+    setState((s) => ({ ...s, tanks: s.tanks.map((t) => t.id === id ? { ...t, name: nm } : t), tank: s.tank && s.tank.id === id ? { ...s.tank, name: nm } : s.tank }));
+    const { error } = await supabase.from("tanks").update({ name: nm }).eq("id", id);
+    if (error) { console.error("renameTank failed:", error.message); alert("Couldn't rename — try again."); }
+  };
+  const deleteTank = async (id) => {
+    if (state.tanks.length <= 1) { alert("You need at least one tank. Create another before deleting this one."); return; }
+    const prev = state.tanks;
+    const remaining = prev.filter((t) => t.id !== id);
+    const nextActive = state.tankId === id ? remaining[0].id : state.tankId;
+    setState((s) => ({ ...s, tanks: remaining }));
+    const { error } = await supabase.from("tanks").delete().eq("id", id);
+    if (error) { console.error("deleteTank failed:", error.message); setState((s) => ({ ...s, tanks: prev })); alert("Couldn't delete tank — try again."); return; }
+    if (state.tankId === id) { try { localStorage.setItem("tr:tank", nextActive); } catch (e) {} await switchTank(nextActive); }
+  };
 
   const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
     library: "Reefpedia", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
@@ -1232,7 +1271,7 @@ function TidepoolReef() {
 
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
-        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
+        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, removeLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
         {view === "admin" && <AdminPanel state={state} />}
@@ -1245,7 +1284,7 @@ function TidepoolReef() {
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
         {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell") }} />}
-        {view === "settings" && <SettingsView {...{ state, setTankSharing }} />}
+        {view === "settings" && <SettingsView {...{ state, setTankSharing, createTank, renameTank, deleteTank }} />}
       </div>
 
       {/* contextual FAB */}
@@ -1461,7 +1500,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
 }
 
 /* ---------------- Log (parameters + journal + livestock) ---------------- */
-function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }) {
+function LogView({ state, latest, sel, setSel, addLivestock, removeLivestock, addLogEntry, switchTank }) {
   const [tab, setTab] = useState("params");
   return (
     <div className="rb-fadein">
@@ -1473,7 +1512,7 @@ function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switch
       </div>
       {tab === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} hideLivestock />}
       {tab === "journal" && <TankLog {...{ state, addLogEntry }} />}
-      {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} livestockOnly />}
+      {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock, removeLivestock }} livestockOnly />}
     </div>
   );
 }
@@ -1951,7 +1990,7 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank }) {
         {issues.map((p) => (
           <div key={p.key} className="rb-li" style={{ cursor: "pointer" }} onClick={() => go("log")}>
             <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--warn),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
-            <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+            <div><div className="nm">{p.label} drifting</div><div className="sub">{(lastVal(state.history, p.key) || {}).v} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
             <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
           </div>
         ))}
@@ -3154,7 +3193,7 @@ function AIScheduleSheet({ state, latest, onClose, onAdd }) {
 }
 
 /* ---------------- Tracker ---------------- */
-function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, livestockOnly }) {
+function Tracker({ state, latest, sel, setSel, addLivestock, removeLivestock, hideLivestock, livestockOnly }) {
   const [lsName, setLsName] = useState("");
   const [lsKind, setLsKind] = useState("Coral");
   const [pick, setPick] = useState(null);
@@ -3363,7 +3402,12 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
             <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.c},#0b2b3d)` }}>
               {l.type === "Fish" ? <Fish size={20} color="#04111a" /> : l.type === "Coral" ? <Waves size={20} color="#04111a" /> : <Shell size={20} color="#04111a" />}
             </div>
-            <div><div className="nm">{l.name}</div><div className="sub">{l.type}{l.note ? " · " + l.note : ""}</div></div>
+            <div style={{ flex: 1, minWidth: 0 }}><div className="nm">{l.name}</div><div className="sub">{l.type}{l.note ? " · " + l.note : ""}</div></div>
+            {removeLivestock && (
+              <span style={{ color: "var(--muted-2)", cursor: "pointer", padding: 8, flex: "none" }}
+                onClick={() => { if (confirm(`Remove ${l.name} from this tank?`)) removeLivestock(l.id); }}
+                title="Remove">✕</span>
+            )}
           </div>
         ))}
       </div>
@@ -3799,7 +3843,8 @@ function Seller({ state, openSell }) {
     </div>
   );
 }
-function SettingsView({ state, setTankSharing }) {
+function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTank }) {
+  const [tankSheet, setTankSheet] = useState(false);
   const Toggle = ({ on, onChange }) => (
     <div onClick={() => onChange(!on)} style={{
       width: 46, height: 27, borderRadius: 14, flex: "none", cursor: "pointer", position: "relative",
@@ -3814,7 +3859,23 @@ function SettingsView({ state, setTankSharing }) {
   );
   return (
     <div className="rb-fadein">
-      <div className="rb-h2" style={{ marginTop: 6 }}><Users size={16} color="var(--aqua)" /> Community sharing</div>
+      <div className="rb-h2" style={{ marginTop: 6 }}><Waves size={16} color="var(--teal)" /> My tanks <small onClick={() => setTankSheet(true)} style={{ cursor: "pointer", color: "var(--aqua)" }}>+ add tank</small></div>
+      <div className="rb-card" style={{ padding: "4px 14px" }}>
+        {state.tanks.map((t, i) => (
+          <div key={t.id} className="rb-li" style={{ borderBottom: i < state.tanks.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">{t.name}</div>
+              <div className="sub">{t.model} · {t.volume} gal · since {t.since}</div>
+            </div>
+            <span style={{ color: "var(--muted)", cursor: "pointer", padding: "6px 8px", fontSize: 12.5, flex: "none" }}
+              onClick={() => { const nm = prompt("Rename tank:", t.name); if (nm != null) renameTank(t.id, nm); }}>Rename</span>
+            <span style={{ color: state.tanks.length > 1 ? "var(--bad)" : "var(--muted-2)", cursor: state.tanks.length > 1 ? "pointer" : "not-allowed", padding: "6px 8px", fontSize: 12.5, flex: "none" }}
+              onClick={() => { if (state.tanks.length <= 1) { alert("You need at least one tank."); return; } if (confirm(`Delete "${t.name}"? This removes its readings, livestock, and journal permanently.`)) deleteTank(t.id); }}>Delete</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-h2"><Users size={16} color="var(--aqua)" /> Community sharing</div>
       <div className="rb-card" style={{ padding: "4px 14px" }}>
         {state.tanks.map((t, i) => (
           <div key={t.id} style={{ padding: "14px 0", borderBottom: i < state.tanks.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
@@ -3850,6 +3911,34 @@ function SettingsView({ state, setTankSharing }) {
       </div>
       <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
       <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef</div>
+      {tankSheet && <NewTankSheet onClose={() => setTankSheet(false)} onCreate={createTank} />}
+    </div>
+  );
+}
+
+function NewTankSheet({ onClose, onCreate }) {
+  const [name, setName] = useState(""); const [model, setModel] = useState(""); const [gal, setGal] = useState("");
+  const [since, setSince] = useState(String(new Date().getFullYear()));
+  const PRESETS = [["IM NuVo Fusion 15", 15], ["Biocube 16", 16], ["40 Gallon Breeder", 40], ["Red Sea Reefer 425 XL", 120]];
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Add a tank</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div className="rb-field"><label>Name</label><input className="rb-input" autoFocus placeholder="e.g. The Frag Tank" value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div className="rb-field"><label>Type</label>
+          <div className="rb-tabs" style={{ margin: "0 0 8px", flexWrap: "wrap" }}>
+            {PRESETS.map(([m, g]) => <div key={m} className={"rb-chip" + (model === m ? " on" : "")} style={{ fontSize: 11.5 }} onClick={() => { setModel(m); setGal(String(g)); }}>{m}</div>)}
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input className="rb-input" placeholder="Model" value={model} onChange={(e) => setModel(e.target.value)} style={{ flex: 2 }} />
+            <input className="rb-input" placeholder="Gallons" type="number" inputMode="numeric" value={gal} onChange={(e) => setGal(e.target.value)} style={{ flex: 1 }} />
+          </div>
+        </div>
+        <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!name.trim()}
+          onClick={() => { onCreate({ name, model, gal, since }); onClose(); }}>
+          <Plus size={16} /> Create tank
+        </button>
+      </div>
     </div>
   );
 }
