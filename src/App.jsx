@@ -488,7 +488,8 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock, readingCount] = await Promise.all([
+  const myTankIds = tanksAll.map((t) => t.id);
+  const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock] = await Promise.all([
     fetchTankChildren(active.id),
     supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
@@ -497,13 +498,15 @@ async function fetchAll(uid) {
     supabase.from("post_comments").select("post_id"),
     fetchSpeciesCounts(),
     supabase.from("profiles").select("id, handle, display_name"),
-    supabase.from("livestock").select("kind, species_id, tank_id, tanks!inner(owner_id)").eq("tanks.owner_id", uid),
-    supabase.from("parameters").select("id, tanks!inner(owner_id)", { count: "exact", head: true }).eq("tanks.owner_id", uid),
+    supabase.from("livestock").select("kind, species_id, tank_id").in("tank_id", myTankIds),
   ]);
   // Surface failures instead of silently rendering an empty feed.
-  [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf]].forEach(([label, r]) => {
+  [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf], ["livestock", allStock]].forEach(([label, r]) => {
     if (r && r.error) console.error(`[tidepool] ${label} query failed:`, r.error.message, r.error.details || "");
   });
+
+  const stock = (allStock && allStock.data) || [];
+  const state_history_total = (children && children.history && children.history.length) || 0;
 
   const people = {};
   (pf.data || []).forEach((p) => (people[p.id] = p));
@@ -520,11 +523,11 @@ async function fetchAll(uid) {
     tanks: tanksAll.map(shapeTank),
     speciesCounts: counts || {},
     totals: {
-      livestock: (allStock.data || []).length,
-      corals: (allStock.data || []).filter((l) => l.kind === "Coral").length,
-      fish: (allStock.data || []).filter((l) => l.kind === "Fish").length,
-      linked: (allStock.data || []).filter((l) => l.species_id).length,
-      readings: readingCount.count || 0,
+      livestock: stock.length,
+      corals: stock.filter((l) => l.kind === "Coral").length,
+      fish: stock.filter((l) => l.kind === "Fish").length,
+      linked: stock.filter((l) => l.species_id).length,
+      readings: state_history_total,
     },
     tankId: active.id,
     tank: shapeTank(active),
@@ -650,7 +653,35 @@ function AuthScreen() {
 /* ======================================================================= */
 /*  Main                                                                    */
 /* ======================================================================= */
-export default function TidepoolReef() {
+class ErrorBoundary extends React.Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { console.error("[tidepool] render error:", err, info); }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#03080c", color: "#e8f4f8", fontFamily: "Hanken Grotesk, system-ui, sans-serif" }}>
+          <div style={{ maxWidth: 380, textAlign: "center" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🪸</div>
+            <div style={{ fontFamily: "Bricolage Grotesque, sans-serif", fontWeight: 800, fontSize: 20, marginBottom: 8 }}>Something hiccuped</div>
+            <div style={{ color: "#8fa8b5", fontSize: 14, lineHeight: 1.5, marginBottom: 18 }}>
+              A screen ran into an error and stopped rendering. Reloading usually clears it.
+            </div>
+            <button onClick={() => location.reload()} style={{ background: "linear-gradient(120deg,#3fe3ff,#2ee6c8)", color: "#04111a", border: "none", borderRadius: 12, padding: "12px 22px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Reload</button>
+            <div style={{ marginTop: 14, fontSize: 11, color: "#5a6b76" }}>{String(this.state.err && this.state.err.message || this.state.err).slice(0, 140)}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+export default function TidepoolReefApp() {
+  return <ErrorBoundary><TidepoolReef /></ErrorBoundary>;
+}
+
+function TidepoolReef() {
   const [state, setState] = useState(null);
   const [view, setView] = useState("tank");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
   const [drawer, setDrawer] = useState(false);
