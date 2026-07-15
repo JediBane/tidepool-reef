@@ -1107,14 +1107,14 @@ function TidepoolReef() {
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
-        {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
+        {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
         {view === "admin" && <AdminPanel state={state} />}
         {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
-        {view === "reefid" && <ReefID />}
+        {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "notifications" && <Notifications />}
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
@@ -1158,10 +1158,11 @@ function TidepoolReef() {
               ["messages", MessageCircle, "Messages"],
               ["purchases", Receipt, "Purchases"],
               ["seller", Store, "Seller Hub"],
+              ...(state.profile.plan !== "pro" ? [["upgrade", Sparkles, "Tidepool Pro", "UPGRADE"]] : []),
               ...(state.profile.is_admin ? [["admin", Users, "Admin"]] : []),
               ["settings", Settings, "Settings"],
             ].map(([k, Icon, lbl, extra]) => (
-              <div key={k} className="rb-mitem" onClick={() => go(k)}>
+              <div key={k} className="rb-mitem" onClick={() => k === "upgrade" ? (setUpgradeOpen(true), setDrawer(false)) : go(k)}>
                 <span className="ic"><Icon size={20} /></span>{lbl}
                 {extra === "dot" && <span className="reldot" />}
                 {extra && extra !== "dot" && <span className="badge">{extra}</span>}
@@ -3217,7 +3218,22 @@ function TankLog({ state, addLogEntry }) {
 }
 
 /* ---------------- Reef ID (Claude vision) ---------------- */
-function ReefID() {
+function FreeTasteBanner({ used, limit, unit, onUpgrade }) {
+  const left = Math.max(0, limit - (used || 0));
+  return (
+    <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", margin: "0 0 12px",
+      background: "rgba(176,108,255,.08)", border: "1px solid rgba(176,108,255,.3)" }}>
+      <Sparkles size={16} color="var(--violet)" style={{ flex: "none" }} />
+      <div style={{ flex: 1, fontSize: 12.5, color: "var(--muted)" }}>
+        <b style={{ color: "#d7b6ff" }}>Free preview:</b> {left} of {limit} {unit} left
+      </div>
+      <button className="rb-btn" style={{ flex: "none", padding: "7px 13px", fontSize: 12,
+        background: "linear-gradient(120deg,var(--violet),#8f5cd6)", color: "#fff" }} onClick={onUpgrade}>Upgrade</button>
+    </div>
+  );
+}
+
+function ReefID({ profile, onUpgrade }) {
   const [img, setImg] = useState(null);     // {b64, media, url}
   const [result, setResult] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3268,6 +3284,9 @@ function ReefID() {
   };
   return (
     <div className="rb-fadein">
+      {profile && profile.plan !== "pro" && (
+        <FreeTasteBanner used={profile.reefid_used} limit={FREE_REEFID} unit="free IDs" onUpgrade={onUpgrade} />
+      )}
       <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
         <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 14 }}>
           Snap or upload a photo of any coral, fish, or invert and DeepDive will identify it and give you care basics.
@@ -3290,7 +3309,7 @@ function ReefID() {
 }
 
 /* ---------------- DeepDive AI ---------------- */
-function DeepDive({ state, latest, issues, switchTank }) {
+function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -3326,6 +3345,9 @@ function DeepDive({ state, latest, issues, switchTank }) {
   };
   return (
     <div className="rb-fadein">
+      {state.profile.plan !== "pro" && (
+        <FreeTasteBanner used={state.profile.deepdive_used} limit={FREE_DEEPDIVE} unit="free AI messages" onUpgrade={onUpgrade} />
+      )}
       <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={async (id) => { await switchTank(id); setMsgs([]); }} />
       {state.tanks.length > 1 && (
         <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 2px 12px", display: "flex", alignItems: "center", gap: 6 }}>
