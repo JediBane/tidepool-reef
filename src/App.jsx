@@ -742,7 +742,13 @@ function usePullToRefresh(onRefresh, refreshing, ready) {
 
 function TidepoolReef() {
   const [state, setState] = useState(null);
-  const [view, setView] = useState("tank");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
+  const [view, setView] = useState(() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get("view");
+      if (["tank", "log", "deepdive", "community", "profile", "tasks", "library", "shop", "reefid"].includes(v)) return v;
+    } catch (e) {}
+    return "tank";
+  });        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
   const [drawer, setDrawer] = useState(false);
   const [sel, setSel] = useState("alk");
   const [cat, setCat] = useState("All");
