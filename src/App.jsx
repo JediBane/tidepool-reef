@@ -3179,8 +3179,8 @@ function AIScheduleSheet({ state, latest, onClose, onAdd }) {
   const ask = async () => {
     if (!(await gateAI("deepdive"))) return;
     setBusy(true); setErr("");
-    const params = latest
-      ? PARAMS.map((p) => `${p.label} ${latest[p.key]}${p.unit} (${statusOf(p, latest[p.key])})`).join(", ")
+    const params = state.history.length
+      ? PARAMS.map((p) => { const lv = lastVal(state.history, p.key); return lv ? `${p.label} ${lv.v}${p.unit} (${statusOf(p, lv.v)})` : null; }).filter(Boolean).join(", ")
       : "no test results logged yet";
     const stock = state.livestock.length
       ? state.livestock.map((l) => `${l.name} (${l.type})`).join(", ") : "nothing logged yet";
