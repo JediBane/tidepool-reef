@@ -314,14 +314,14 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 /*  Data                                                                    */
 /* ======================================================================= */
 const PARAMS = [
-  { key: "alk",  label: "Alkalinity", unit: "dKH", min: 7.5, max: 9.5, ideal: [8, 9],       dec: 1 },
-  { key: "cal",  label: "Calcium",    unit: "ppm", min: 380, max: 470, ideal: [420, 440],   dec: 0 },
-  { key: "mag",  label: "Magnesium",  unit: "ppm", min: 1250,max: 1450,ideal: [1300, 1400], dec: 0 },
-  { key: "no3",  label: "Nitrate",    unit: "ppm", min: 0,   max: 30,  ideal: [5, 10],      dec: 1 },
-  { key: "po4",  label: "Phosphate",  unit: "ppm", min: 0,   max: 0.25,ideal: [0.03, 0.1],  dec: 2 },
-  { key: "ph",   label: "pH",         unit: "",    min: 7.7, max: 8.5, ideal: [8.0, 8.4],   dec: 2 },
-  { key: "sal",  label: "Salinity",   unit: "sg",  min: 1.02,max: 1.028,ideal:[1.024,1.026],dec: 3 },
-  { key: "temp", label: "Temp",       unit: "°F",  min: 74,  max: 82,  ideal: [76, 78],     dec: 1 },
+  { key: "alk",  label: "Alkalinity", unit: "dKH", min: 7.5, max: 9.5, ideal: [8, 9],       dec: 1, w: 3 },
+  { key: "cal",  label: "Calcium",    unit: "ppm", min: 380, max: 470, ideal: [420, 440],   dec: 0, w: 1 },
+  { key: "mag",  label: "Magnesium",  unit: "ppm", min: 1250,max: 1450,ideal: [1300, 1400], dec: 0, w: 1 },
+  { key: "no3",  label: "Nitrate",    unit: "ppm", min: 0,   max: 30,  ideal: [5, 10],      dec: 1, w: 1.5 },
+  { key: "po4",  label: "Phosphate",  unit: "ppm", min: 0,   max: 0.25,ideal: [0.03, 0.1],  dec: 2, w: 1.5 },
+  { key: "ph",   label: "pH",         unit: "",    min: 7.7, max: 8.5, ideal: [8.0, 8.4],   dec: 2, w: 2 },
+  { key: "sal",  label: "Salinity",   unit: "sg",  min: 1.02,max: 1.028,ideal:[1.024,1.026],dec: 3, w: 3 },
+  { key: "temp", label: "Temp",       unit: "°F",  min: 74,  max: 82,  ideal: [76, 78],     dec: 1, w: 3 },
 ];
 const dayMs = 86400000;
 const fmtDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -535,7 +535,8 @@ async function fetchAll(uid) {
     ...children,
     listings: (mr.data || []).map((r, i) => ({
       id: r.id, cat: r.category, title: r.title, price: Number(r.price_usd),
-      loc: r.location || "", seller: (people[r.seller_id] && people[r.seller_id].handle) || "reefer", g: PALETTE[i % PALETTE.length],
+      loc: r.location || "", seller: (people[r.seller_id] && people[r.seller_id].handle) || "reefer",
+      sellerId: r.seller_id, description: r.description || "", created_at: r.created_at, g: PALETTE[i % PALETTE.length],
     })),
     posts: (sr.data || []).map((r) => {
       const a = people[r.author_id];
@@ -1108,8 +1109,15 @@ function TidepoolReef() {
   };
   const addListing = async (l) => {
     const loc = state.profile.location || "Florida, United States";
-    setState((s) => ({ ...s, listings: [{ ...l, id: "tmp" + Date.now(), seller: s.profile.handle, loc, g: PALETTE[0] }, ...s.listings] }));
-    await supabase.from("listings").insert({ seller_id: state.uid, category: l.cat, title: l.title, price_usd: l.price, location: loc });
+    const prev = state.listings;
+    setState((s) => ({ ...s, listings: [{ ...l, id: "tmp" + Date.now(), seller: s.profile.handle, sellerId: s.uid, loc, created_at: new Date().toISOString(), g: PALETTE[0] }, ...s.listings] }));
+    const { error } = await supabase.from("listings").insert({ seller_id: state.uid, category: l.cat, title: l.title, price_usd: l.price, location: loc, description: l.description || null });
+    if (error) {
+      console.error("addListing failed:", error.message);
+      setState((s) => ({ ...s, listings: prev }));
+      alert("Couldn't post that listing — try again.");
+      return;
+    }
     award(3);
   };
   const addPost = async (body, tag = "Update") => {
@@ -1230,7 +1238,7 @@ function TidepoolReef() {
         {view === "admin" && <AdminPanel state={state} />}
         {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
-        {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
+        {view === "shop" && <Shop {...{ allListings, cat, setCat, uid: state.uid, onMessage: (who, prefill) => { setMsgTo({ ...who, prefill }); setSheet("message"); } }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
         {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} tanks={state.tanks} addTo={addLivestockTo} />}
         {view === "notifications" && <Notifications uid={session.user.id} />}
@@ -1333,10 +1341,15 @@ function TankSwitcher({ tanks, tankId, switchTank }) {
 /* ---------------- Tank (home) ---------------- */
 function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
   const t = state.tank;
-  // Health from each parameter's LAST KNOWN value (partial logs leave nulls in the latest row)
+  // Health from each parameter's LAST KNOWN value, weighted by real reef impact
+  // (temp/salinity/alk swings hurt far more than a slightly-off magnesium).
   const known = PARAMS.map((p) => ({ p, lv: lastVal(state.history, p.key) })).filter((x) => x.lv);
+  const totalW = known.reduce((a, { p }) => a + (p.w || 1), 0);
   const health = known.length
-    ? Math.round((known.reduce((a, { p, lv }) => a + (statusOf(p, lv.v) === "good" ? 1 : statusOf(p, lv.v) === "warn" ? 0.6 : 0.2), 0) / known.length) * 100)
+    ? Math.round((known.reduce((a, { p, lv }) => {
+        const score = statusOf(p, lv.v) === "good" ? 1 : statusOf(p, lv.v) === "warn" ? 0.6 : 0.2;
+        return a + score * (p.w || 1);
+      }, 0) / totalW) * 100)
     : null;
   const nextTasks = [...state.tasks].sort((a, b) => a.due - b.due).slice(0, 2);
   const lastLog = state.log[0];
@@ -2761,7 +2774,7 @@ function MessageSheet({ to, onClose, onSend }) {
     `Any tips for keeping ${sp.name} happy?`,
     `What are you feeding your ${sp.name}?`,
   ] : ["Hey! 👋"];
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(to.prefill || "");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const send = async () => {
@@ -2814,7 +2827,8 @@ function MessageSheet({ to, onClose, onSend }) {
 }
 
 /* ---------------- Shop ---------------- */
-function Shop({ allListings, cat, setCat }) {
+function Shop({ allListings, cat, setCat, uid, onMessage }) {
+  const [sel, setSel] = useState(null);
   const cats = ["All", "Coral", "Fish", "Equipment"];
   const shown = cat === "All" ? allListings : allListings.filter((l) => l.cat === cat);
   return (
@@ -2835,7 +2849,7 @@ function Shop({ allListings, cat, setCat }) {
       ) : (
       <div className="rb-mgrid">
         {shown.map((l) => (
-          <div key={l.id} className="rb-card rb-mcard">
+          <div key={l.id} className="rb-card rb-mcard" style={{ cursor: "pointer" }} onClick={() => setSel(l)}>
             <div className="rb-mimg" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}>
               <span className="cat">{l.cat}</span>
               {l.cat === "Fish" ? <Fish size={30} /> : l.cat === "Equipment" ? <Droplets size={30} /> : <Waves size={30} />}
@@ -2848,6 +2862,36 @@ function Shop({ allListings, cat, setCat }) {
         ))}
       </div>
       )}
+      {sel && <ListingSheet listing={sel} uid={uid} onClose={() => setSel(null)} onMessage={onMessage} />}
+    </div>
+  );
+}
+
+function ListingSheet({ listing: l, uid, onClose, onMessage }) {
+  const mine = l.sellerId === uid;
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Listing</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div style={{ height: 150, borderRadius: 16, background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})`, display: "grid", placeItems: "center", position: "relative", marginBottom: 14 }}>
+          <span style={{ position: "absolute", top: 10, left: 10, fontSize: 11, background: "rgba(3,8,12,.72)", color: "#fff", padding: "3px 10px", borderRadius: 20 }}>{l.cat}</span>
+          {l.cat === "Fish" ? <Fish size={44} color="rgba(4,17,26,.55)" /> : l.cat === "Equipment" ? <Droplets size={44} color="rgba(4,17,26,.55)" /> : <Waves size={44} color="rgba(4,17,26,.55)" />}
+        </div>
+        <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21 }}>{l.title}</div>
+        <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24, color: "var(--aqua)", marginTop: 2 }}>${l.price}</div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <MapPin size={12} /> {l.loc || "Location not set"} · listed by @{l.seller}{l.created_at ? ` · ${rel(l.created_at)}` : ""}
+        </div>
+        {l.description && <div style={{ fontSize: 13.5, color: "#d8eef5", lineHeight: 1.55, marginTop: 12 }}>{l.description}</div>}
+        {mine ? (
+          <div className="rb-card" style={{ padding: 12, marginTop: 16, textAlign: "center", fontSize: 12.5, color: "var(--muted)" }}>This is your listing.</div>
+        ) : (
+          <button className="rb-btn" style={{ width: "100%", marginTop: 16, padding: 14 }}
+            onClick={() => { onClose(); onMessage({ id: l.sellerId, handle: l.seller }, `Hi! Is your "${l.title}" ($${l.price}) still available?`); }}>
+            <Send size={16} /> Message @{l.seller}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -3848,6 +3892,7 @@ function LogSheet({ latest, history, onClose, onSave }) {
 }
 function SellSheet({ onClose, onSave }) {
   const [title, setTitle] = useState(""); const [price, setPrice] = useState(""); const [cat, setCat] = useState("Coral");
+  const [desc, setDesc] = useState("");
   return (
     <div className="rb-overlay" onClick={onClose}>
       <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
@@ -3857,8 +3902,10 @@ function SellSheet({ onClose, onSave }) {
         </div>
         <div className="rb-field"><label>Title</label><input className="rb-input" placeholder="e.g. WYSIWYG Acan frag" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
         <div className="rb-field"><label>Price ($)</label><input className="rb-input" type="number" inputMode="decimal" placeholder="45" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
+        <div className="rb-field"><label>Description <span style={{ color: "var(--muted-2)" }}>(optional)</span></label>
+          <textarea className="rb-input" rows={3} placeholder="Size, coloration, care notes, pickup vs shipping…" value={desc} onChange={(e) => setDesc(e.target.value)} /></div>
         <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!title.trim() || !price}
-          onClick={() => { onSave({ cat, title: title.trim(), price: parseFloat(price) || 0 }); onClose(); }}>
+          onClick={() => { onSave({ cat, title: title.trim(), price: parseFloat(price) || 0, description: desc.trim() }); onClose(); }}>
           <Tag size={16} /> Post listing <span style={{ opacity: .7 }}>· +3 Pearls</span>
         </button>
       </div>
