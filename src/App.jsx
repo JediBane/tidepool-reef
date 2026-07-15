@@ -181,7 +181,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 
 /* inputs */
 .rb-input{width:100%;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:12px;color:var(--text);
-  font-family:inherit;font-size:14px;padding:11px 13px;resize:none;outline:none;}
+  font-family:inherit;font-size:16px;padding:11px 13px;resize:none;outline:none;}
 .rb-input:focus{border-color:var(--brd-2);}
 .rb-btn{border:none;border-radius:12px;padding:11px 16px;font-family:'Hanken Grotesk';font-weight:700;font-size:14px;
   background:linear-gradient(120deg,var(--aqua),var(--teal));color:var(--bg-0);cursor:pointer;display:inline-flex;
@@ -205,8 +205,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 
 /* sheet */
 .rb-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:rgba(2,10,16,.7);backdrop-filter:blur(4px);
-  display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;overflow-y:auto;overscroll-behavior:contain;}
-.rb-sheet{width:min(480px,100%);max-height:88vh;overflow-y:auto;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
+  display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;overscroll-behavior:contain;}
+.rb-sheet{width:min(480px,100%);max-height:90vh;max-height:90dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
   border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
 @keyframes rbSheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
 .rb-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
@@ -252,7 +252,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-searchrow{display:flex;align-items:center;gap:10px;margin:2px 0 6px;}
 .rb-iconbtn.sm{width:38px;height:38px;border-radius:50%;}
 .rb-searchpill{flex:1;display:flex;align-items:center;gap:9px;background:rgba(255,255,255,.04);border:1px solid var(--brd);border-radius:24px;padding:10px 16px;}
-.rb-searchpill input{flex:1;background:transparent;border:none;color:var(--text);outline:none;font-family:inherit;font-size:14px;}
+.rb-searchpill input{flex:1;background:transparent;border:none;color:var(--text);outline:none;font-family:inherit;font-size:16px;}
 .rb-sec{margin:22px 2px 12px;}
 .rb-sec h3{font-family:'Bricolage Grotesque';font-weight:800;font-size:21px;letter-spacing:-.5px;margin:0;}
 .rb-sec p{color:var(--muted);font-size:13px;margin:3px 0 0;}
