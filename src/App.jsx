@@ -121,7 +121,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 /* lists */
 .rb-li{display:flex;align-items:center;gap:13px;padding:13px 14px;border-bottom:1px solid rgba(255,255,255,.05);}
 .rb-li:last-child{border-bottom:none;}
-.rb-thumb{width:46px;height:46px;border-radius:13px;flex:none;display:grid;place-items:center;color:#04111a;}
+.rb-thumb{width:46px;height:46px;border-radius:13px;flex:none;display:grid;place-items:center;color:#04111a;overflow:hidden;}
+.rb-thumb img{width:100%;height:100%;object-fit:cover;}
 .rb-li .nm{font-weight:600;font-size:14px;}
 .rb-li .sub{font-size:12px;color:var(--muted);margin-top:1px;}
 
@@ -475,7 +476,11 @@ async function fetchTankChildren(tankId) {
       date: new Date(r.measured_at).getTime(),
       alk: r.alk, cal: r.cal, mag: r.mag, no3: r.no3, po4: r.po4, ph: r.ph, sal: r.sal, temp: r.temp,
     })),
-    livestock: (lr.data || []).map((r) => ({ id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff", species_id: r.species_id })),
+    livestock: (lr.data || []).map((r) => ({
+      id: r.id, type: r.kind, name: r.name, note: r.note || "", c: r.color || KIND_COLOR[r.kind] || "#3fe3ff", species_id: r.species_id,
+      price: r.price_usd, source: r.source || "", size: r.size_note || "", acquiredAt: r.acquired_at, photo: r.photo_url || null,
+      status: r.status || "alive", endedAt: r.ended_at, endReason: r.end_reason || "",
+    })),
     tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
     log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
   };
@@ -1194,31 +1199,68 @@ function TidepoolReef() {
     }
     award(5);
   };
-  const addLivestock = async (kind, name, note, speciesId) => {
+  const addLivestock = async (kind, name, note, speciesId, detail = {}) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
     const prev = state.livestock;
-    setState((s) => ({ ...s, livestock: [...s.livestock, { id: "tmp" + Date.now(), type: kind, name, note: note || "", c, species_id: speciesId || null }] }));
-    const { error } = await supabase.from("livestock").insert({ tank_id: state.tankId, kind, name, note: note || null, color: c, species_id: speciesId || null });
+    const row = {
+      tank_id: state.tankId, kind, name, note: note || null, color: c, species_id: speciesId || null,
+      price_usd: detail.price != null && detail.price !== "" ? Number(detail.price) : null,
+      source: detail.source || null,
+      size_note: detail.size || null,
+      acquired_at: detail.acquiredAt || null,
+      photo_url: detail.photoUrl || null,
+    };
+    const tmpId = "tmp" + Date.now();
+    setState((s) => ({ ...s, livestock: [...s.livestock, {
+      id: tmpId, type: kind, name, note: note || "", c, species_id: speciesId || null,
+      price: row.price_usd, source: detail.source || "", size: detail.size || "", acquiredAt: detail.acquiredAt || null,
+      photo: detail.photoUrl || null, status: "alive",
+    }] }));
+    const { data, error } = await supabase.from("livestock").insert(row).select().single();
     if (error) {
       console.error("addLivestock failed:", error.message);
       setState((s) => ({ ...s, livestock: prev }));
       alert("Couldn't add that livestock — try again.");
-      return;
+      return null;
     }
-    if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (s.livestock.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
+    // swap tmp id for the real one
+    setState((s) => ({ ...s, livestock: s.livestock.map((l) => l.id === tmpId ? { ...l, id: data.id } : l) }));
+    if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (prev.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
+    // Auto-journal entry — detailed
+    const bits = [];
+    if (row.price_usd != null) bits.push(`$${row.price_usd}`);
+    if (detail.source) bits.push(`from ${detail.source}`);
+    if (detail.size) bits.push(detail.size);
+    const acq = detail.acquiredAt ? new Date(detail.acquiredAt + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
+    if (acq) bits.push(`acquired ${acq}`);
+    const journalNote = `Added ${name} (${kind})${bits.length ? " — " + bits.join(", ") : ""}.${note ? " Note: " + note : ""}`;
+    await supabase.from("tank_log").insert({ tank_id: state.tankId, entry_type: "Addition", note: journalNote });
+    setState((s) => ({ ...s, log: [{ id: "tmp" + Date.now(), date: Date.now(), type: "Addition", note: journalNote }, ...s.log] }));
+    return data.id;
   };
-  const removeLivestock = async (id) => {
+  const endLivestock = async (id, reason, endReason) => {
+    // reason: 'died' | 'sold' | 'traded' | 'removed'. Archives (off active list) but keeps the record + journal.
     const prev = state.livestock;
-    const gone = prev.find((l) => l.id === id);
-    setState((s) => ({ ...s, livestock: s.livestock.filter((l) => l.id !== id) }));
-    const { error } = await supabase.from("livestock").delete().eq("id", id);
+    const item = prev.find((l) => l.id === id);
+    if (!item) return;
+    const today = new Date().toISOString().slice(0, 10);
+    setState((s) => ({ ...s, livestock: s.livestock.map((l) => l.id === id ? { ...l, status: reason, endedAt: today, endReason: endReason || "" } : l) }));
+    const { error } = await supabase.from("livestock").update({ status: reason, ended_at: today, end_reason: endReason || null }).eq("id", id);
     if (error) {
-      console.error("removeLivestock failed:", error.message);
+      console.error("endLivestock failed:", error.message);
       setState((s) => ({ ...s, livestock: prev }));
-      alert("Couldn't remove that — try again.");
+      alert("Couldn't update that — try again.");
       return;
     }
-    if (gone && gone.species_id) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [gone.species_id]: Math.max(0, (s.speciesCounts[gone.species_id] || 1) - 1) } }));
+    if (item.species_id) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [item.species_id]: Math.max(0, (s.speciesCounts[item.species_id] || 1) - 1) } }));
+    // Days kept, if we know when it was acquired
+    let kept = "";
+    const start = item.acquiredAt ? new Date(item.acquiredAt + "T00:00") : null;
+    if (start) { const days = Math.max(0, Math.round((Date.now() - start.getTime()) / 86400000)); kept = ` — kept ${days} day${days === 1 ? "" : "s"}`; }
+    const verb = reason === "died" ? "Lost" : reason === "sold" ? "Sold" : reason === "traded" ? "Traded" : "Removed";
+    const journalNote = `${verb} ${item.name} (${item.type})${kept}.${endReason ? " " + endReason : ""}`;
+    await supabase.from("tank_log").insert({ tank_id: state.tankId, entry_type: reason === "died" ? "Loss" : "Removal", note: journalNote });
+    setState((s) => ({ ...s, log: [{ id: "tmp" + Date.now(), date: Date.now(), type: reason === "died" ? "Loss" : "Removal", note: journalNote }, ...s.log] }));
   };
   const addLivestockTo = async (tankId, kind, name, speciesId) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
@@ -1437,7 +1479,7 @@ function TidepoolReef() {
 
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
-        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, removeLivestock, addLogEntry, switchTank }} />}
+        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid: state.uid, profile: state.profile }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
         {view === "admin" && <AdminPanel state={state} />}
@@ -1666,7 +1708,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
 }
 
 /* ---------------- Log (parameters + journal + livestock) ---------------- */
-function LogView({ state, latest, sel, setSel, addLivestock, removeLivestock, addLogEntry, switchTank }) {
+function LogView({ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid, profile }) {
   const [tab, setTab] = useState("params");
   return (
     <div className="rb-fadein">
@@ -1678,7 +1720,7 @@ function LogView({ state, latest, sel, setSel, addLivestock, removeLivestock, ad
       </div>
       {tab === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} hideLivestock />}
       {tab === "journal" && <TankLog {...{ state, addLogEntry }} />}
-      {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock, removeLivestock }} livestockOnly />}
+      {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock, endLivestock, uid, profile }} livestockOnly />}
     </div>
   );
 }
@@ -2036,7 +2078,7 @@ function AdminPanel({ state }) {
   return (
     <div className="rb-fadein">
       <div className="rb-tabs" style={{ marginTop: 4, flexWrap: "wrap" }}>
-        {[["overview", "Overview"], ["users", "Users"], ["content", "Content"], ["market", "Market"]].map(([k, l]) => (
+        {[["overview", "Overview"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"]].map(([k, l]) => (
           <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</div>
         ))}
       </div>
@@ -2044,6 +2086,38 @@ function AdminPanel({ state }) {
       {tab === "users" && <AdminUsers state={state} />}
       {tab === "content" && <AdminContent />}
       {tab === "market" && <AdminMarket />}
+      {tab === "photos" && <AdminPhotos />}
+    </div>
+  );
+}
+
+function AdminPhotos() {
+  const [pending, setPending] = useState(null);
+  const load = () => supabase.from("species_photo_contributions").select("*").eq("status", "pending").order("created_at", { ascending: false })
+    .then(({ data }) => setPending(data || []));
+  useEffect(() => { load(); }, []);
+  const act = async (id, status) => {
+    setPending((p) => p.filter((x) => x.id !== id));
+    await supabase.from("species_photo_contributions").update({ status }).eq("id", id);
+  };
+  if (pending === null) return <div className="rb-empty" style={{ padding: 30 }}>Loading…</div>;
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="rb-h2" style={{ marginTop: 0 }}><Camera size={15} color="var(--teal)" /> Photo contributions <small>{pending.length} pending</small></div>
+      {pending.length === 0 && <div className="rb-card rb-empty" style={{ padding: 28 }}>No photos waiting for review.</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10 }}>
+        {pending.map((c) => (
+          <div key={c.id} className="rb-card" style={{ padding: 8 }}>
+            <img src={c.photo_url} alt="" style={{ width: "100%", height: 130, objectFit: "cover", borderRadius: 10 }} />
+            <div style={{ fontSize: 12, fontWeight: 600, margin: "6px 2px 2px" }}>{c.caption || "—"}</div>
+            <div style={{ fontSize: 10.5, color: "var(--muted-2)", margin: "0 2px 8px" }}>{c.species_id}</div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="rb-btn" style={{ flex: 1, padding: "7px 0", fontSize: 12 }} onClick={() => act(c.id, "approved")}>Approve</button>
+              <button className="rb-btn ghost" style={{ flex: 1, padding: "7px 0", fontSize: 12 }} onClick={() => act(c.id, "rejected")}>Reject</button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -2868,10 +2942,14 @@ function PhotoCredit({ item }) {
 
 function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTank }) {
   const [keepers, setKeepers] = useState(null);
+  const [communityPhotos, setCommunityPhotos] = useState([]);
   useEffect(() => {
     let alive = true;
     if (item.cat === "Pest") { setKeepers([]); return; }
     fetchKeepers(item.id).then((k) => { if (alive) setKeepers(k); });
+    supabase.from("species_photo_contributions").select("id, photo_url, caption")
+      .eq("species_id", item.id).eq("status", "approved").limit(12)
+      .then(({ data }) => { if (alive && data) setCommunityPhotos(data); });
     return () => { alive = false; };
   }, [item.id]);
   const [tips, setTips] = useState("");
@@ -2912,6 +2990,16 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
           </span>
         </div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "#d8eef5", marginBottom: 14 }}>{item.blurb}</div>
+        {communityPhotos.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}><Camera size={14} color="var(--teal)" /> Community photos <small>{communityPhotos.length}</small></div>
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+              {communityPhotos.map((cp) => (
+                <img key={cp.id} src={cp.photo_url} alt={cp.caption || ""} style={{ height: 96, borderRadius: 10, flex: "none", objectFit: "cover" }} />
+              ))}
+            </div>
+          </div>
+        )}
         <div className="rb-card" style={{ padding: "4px 14px", marginBottom: 14 }}>
           {item.facts.map(([k, v], i) => (
             <div key={i} style={{ display: "flex", gap: 12, padding: "10px 0",
@@ -3445,16 +3533,10 @@ function AIScheduleSheet({ state, latest, onClose, onAdd }) {
 }
 
 /* ---------------- Tracker ---------------- */
-function Tracker({ state, latest, sel, setSel, addLivestock, removeLivestock, hideLivestock, livestockOnly }) {
-  const [lsName, setLsName] = useState("");
-  const [lsKind, setLsKind] = useState("Coral");
-  const [pick, setPick] = useState(null);
-  const KIND_CATS = { Coral: ["SPS", "LPS", "Soft"], Fish: ["Fish"], Invert: ["Invert"] };
-  const q = lsName.trim().toLowerCase();
-  const matches = q.length < 2 ? [] : REEFPEDIA
-    .filter((r) => KIND_CATS[lsKind].includes(r.cat) &&
-      (r.name.toLowerCase().includes(q) || r.sci.toLowerCase().includes(q)))
-    .slice(0, 5);
+function Tracker({ state, latest, sel, setSel, addLivestock, endLivestock, hideLivestock, livestockOnly, uid, profile }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState(null);
+  const [showArchived, setShowArchived] = useState(false);
   const p = PARAMS.find((x) => x.key === sel);
   const [range, setRange] = useState(90);            // days; 0 = all; "custom"
   const [customFrom, setCustomFrom] = useState("");
@@ -3619,51 +3701,251 @@ function Tracker({ state, latest, sel, setSel, addLivestock, removeLivestock, hi
       </div>)}
       </>)}
       {!hideLivestock && (<>
-      <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{state.livestock.length} in tank</small></div>
-      <div className="rb-card" style={{ padding: 14, marginBottom: 10 }}>
-        <div className="rb-tabs" style={{ margin: "0 0 10px" }}>
-          {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (lsKind === k ? " on" : "")} onClick={() => { setLsKind(k); setPick(null); }}>{k}</div>)}
+      {(() => {
+        const active = state.livestock.filter((l) => (l.status || "alive") === "alive");
+        const archived = state.livestock.filter((l) => (l.status || "alive") !== "alive");
+        return (<>
+        <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{active.length} in tank</small></div>
+        <button className="rb-btn" style={{ width: "100%", marginBottom: 10, padding: 12 }} onClick={() => setAddOpen(true)}>
+          <Plus size={16} /> Add livestock
+        </button>
+        <div className="rb-card">
+          {active.length === 0 && <div className="rb-empty">Nothing in the tank yet — tap "Add livestock" to log your first coral, fish, or invert.</div>}
+          {active.map((l) => (
+            <div key={l.id} className="rb-li" style={{ cursor: "pointer" }} onClick={() => setDetailItem(l)}>
+              {l.photo
+                ? <img src={l.photo} alt="" className="rb-thumb" style={{ objectFit: "cover" }} />
+                : <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.c},#0b2b3d)` }}>
+                    {l.type === "Fish" ? <Fish size={20} color="#04111a" /> : l.type === "Coral" ? <Waves size={20} color="#04111a" /> : <Shell size={20} color="#04111a" />}
+                  </div>}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="nm">{l.name}</div>
+                <div className="sub">{l.type}{l.price != null ? ` · $${l.price}` : ""}{l.acquiredAt ? ` · ${fmtAcq(l.acquiredAt)}` : ""}</div>
+              </div>
+              <ChevronRight size={17} color="var(--muted)" style={{ flex: "none" }} />
+            </div>
+          ))}
         </div>
-        <div style={{ display: "flex", gap: 9 }}>
-          <input className="rb-input" placeholder={lsKind === "Fish" ? "e.g. Royal Gramma" : lsKind === "Invert" ? "e.g. Cleaner Shrimp" : "e.g. Gold Hammer"} value={lsName}
-            onChange={(e) => { setLsName(e.target.value); setPick(null); }} />
-          <button className="rb-btn" disabled={!lsName.trim()} onClick={() => { addLivestock(lsKind, lsName.trim(), null, pick && pick.id); setLsName(""); setPick(null); }}><Plus size={16} /></button>
-        </div>
-        {pick ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12.5, color: "var(--muted)" }}>
-            <Check size={14} color="var(--good)" /> Linked to <b style={{ color: "var(--text)" }}>{pick.name}</b> in Reefpedia
-            <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--muted-2)" }} onClick={() => setPick(null)}>clear</span>
+
+        {archived.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="rb-h2" style={{ cursor: "pointer" }} onClick={() => setShowArchived((v) => !v)}>
+              <Clock size={15} color="var(--muted)" /> Past livestock <small>{archived.length} · {showArchived ? "hide" : "show"}</small>
+            </div>
+            {showArchived && (
+              <div className="rb-card">
+                {archived.map((l) => (
+                  <div key={l.id} className="rb-li" style={{ cursor: "pointer", opacity: .7 }} onClick={() => setDetailItem(l)}>
+                    <div className="rb-thumb" style={{ background: "linear-gradient(140deg,#3a4a55,#0b2b3d)" }}>
+                      {l.status === "died" ? <span style={{ fontSize: 15 }}>🕊️</span> : l.type === "Fish" ? <Fish size={18} color="#04111a" /> : l.type === "Coral" ? <Waves size={18} color="#04111a" /> : <Shell size={18} color="#04111a" />}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className="nm">{l.name}</div>
+                      <div className="sub" style={{ textTransform: "capitalize" }}>{l.status}{l.endedAt ? ` · ${fmtAcq(l.endedAt)}` : ""}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        ) : matches.length > 0 && (
-          <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>Link to a species so other reefers can find you:</div>
-            <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
-              {matches.map((m) => (
-                <div key={m.id} className="rb-chip" style={{ fontSize: 12 }} onClick={() => { setPick(m); if (!lsName.trim()) setLsName(m.name); }}>
-                  {m.name}
-                </div>
+        )}
+
+        {addOpen && <AddLivestockSheet uid={uid} onClose={() => setAddOpen(false)} onAdd={addLivestock} />}
+        {detailItem && <LivestockDetailSheet item={detailItem} uid={uid} profile={profile} onClose={() => setDetailItem(null)} onEnd={endLivestock} />}
+        </>);
+      })()}
+      </>)}
+    </div>
+  );
+}
+
+const fmtAcq = (d) => { try { return new Date(d + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return d; } };
+
+function AddLivestockSheet({ uid, onClose, onAdd }) {
+  const [kind, setKind] = useState("Coral");
+  const [name, setName] = useState("");
+  const [pick, setPick] = useState(null);
+  const [price, setPrice] = useState("");
+  const [source, setSource] = useState("");
+  const [size, setSize] = useState("");
+  const [acquiredAt, setAcquiredAt] = useState(new Date().toISOString().slice(0, 10));
+  const [note, setNote] = useState("");
+  const [photo, setPhoto] = useState(null);   // {url, file}
+  const [busy, setBusy] = useState(false);
+  const photoRef = useRef(null);
+  const KIND_CATS = { Coral: ["SPS", "LPS", "Soft"], Fish: ["Fish"], Invert: ["Invert"] };
+  const q = name.trim().toLowerCase();
+  const matches = q.length < 2 || pick ? [] : REEFPEDIA
+    .filter((r) => KIND_CATS[kind].includes(r.cat) && (r.name.toLowerCase().includes(q) || r.sci.toLowerCase().includes(q))).slice(0, 5);
+
+  const save = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    let photoUrl = null;
+    if (photo) { photoUrl = await uploadPhoto(photo.file, uid); }
+    await onAdd(kind, name.trim(), note.trim() || null, pick && pick.id, {
+      price, source: source.trim(), size: size.trim(), acquiredAt, photoUrl,
+    });
+    setBusy(false); onClose();
+  };
+
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Add livestock</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+
+        <div className="rb-field"><label>Type</label>
+          <div className="rb-tabs" style={{ margin: 0 }}>
+            {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (kind === k ? " on" : "")} onClick={() => { setKind(k); setPick(null); }}>{k}</div>)}
+          </div>
+        </div>
+
+        <div className="rb-field"><label>Name</label>
+          <input className="rb-input" placeholder={kind === "Fish" ? "e.g. Royal Gramma" : kind === "Invert" ? "e.g. Cleaner Shrimp" : "e.g. Gold Torch"}
+            value={name} onChange={(e) => { setName(e.target.value); setPick(null); }} />
+          {pick ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12.5, color: "var(--muted)" }}>
+              <Check size={14} color="var(--good)" /> Linked to <b style={{ color: "var(--text)" }}>{pick.name}</b> in Reefpedia
+              <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--muted-2)" }} onClick={() => setPick(null)}>clear</span>
+            </div>
+          ) : matches.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>Link to a species (helps others find you as a keeper):</div>
+              <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+                {matches.map((m) => <div key={m.id} className="rb-chip" style={{ fontSize: 12 }} onClick={() => { setPick(m); if (!name.trim()) setName(m.name); }}>{m.name}</div>)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Photo */}
+        <div className="rb-field"><label>Photo of your specimen</label>
+          <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) setPhoto({ url: URL.createObjectURL(f), file: f }); e.target.value = ""; }} />
+          {photo ? (
+            <div style={{ position: "relative", width: "fit-content" }}>
+              <img src={photo.url} alt="" style={{ maxHeight: 130, borderRadius: 12 }} />
+              <span onClick={() => setPhoto(null)} style={{ position: "absolute", top: 6, right: 6, background: "rgba(3,8,12,.8)", color: "#fff", borderRadius: "50%", width: 24, height: 24, display: "grid", placeItems: "center", cursor: "pointer", fontWeight: 700 }}>✕</span>
+            </div>
+          ) : (
+            <div className="rb-drop" style={{ padding: 20 }} onClick={() => photoRef.current && photoRef.current.click()}>
+              <Camera size={24} style={{ opacity: .8 }} /><div style={{ marginTop: 8, fontWeight: 600, fontSize: 13 }}>Take or upload a photo</div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <div className="rb-field" style={{ flex: 1 }}><label>Price ($)</label>
+            <input className="rb-input" type="number" inputMode="decimal" placeholder="45" value={price} onChange={(e) => setPrice(e.target.value)} /></div>
+          <div className="rb-field" style={{ flex: 1 }}><label>Date acquired</label>
+            <input className="rb-input" type="date" value={acquiredAt} onChange={(e) => setAcquiredAt(e.target.value)} /></div>
+        </div>
+        <div className="rb-field"><label>Source <span style={{ color: "var(--muted-2)" }}>(store, seller, frag swap…)</span></label>
+          <input className="rb-input" placeholder="e.g. Local Fish Store, @reefer_handle" value={source} onChange={(e) => setSource(e.target.value)} /></div>
+        <div className="rb-field"><label>Size / details <span style={{ color: "var(--muted-2)" }}>(optional)</span></label>
+          <input className="rb-input" placeholder="e.g. 2-head frag, ~1.5 in" value={size} onChange={(e) => setSize(e.target.value)} /></div>
+        <div className="rb-field"><label>Notes <span style={{ color: "var(--muted-2)" }}>(optional)</span></label>
+          <textarea className="rb-input" rows={2} placeholder="Placement, flow, acclimation notes…" value={note} onChange={(e) => setNote(e.target.value)} /></div>
+
+        <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!name.trim() || busy} onClick={save}>
+          <Check size={16} /> {busy ? "Saving…" : "Add to tank"} <span style={{ opacity: .7 }}>· logs to journal</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
+  const [endMode, setEndMode] = useState(false);
+  const [reason, setReason] = useState("died");
+  const [endReason, setEndReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [shared, setShared] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const isActive = (item.status || "alive") === "alive";
+  const daysKept = item.acquiredAt ? Math.max(0, Math.round((( item.endedAt ? new Date(item.endedAt + "T00:00").getTime() : Date.now()) - new Date(item.acquiredAt + "T00:00").getTime()) / 86400000)) : null;
+
+  const shareToLibrary = async () => {
+    if (!item.species_id || !item.photo) { alert("Link this to a Reefpedia species and add a photo first."); return; }
+    setSharing(true);
+    const { error } = await supabase.from("species_photo_contributions").insert({
+      species_id: item.species_id, contributor_id: uid, photo_url: item.photo, livestock_id: item.id.startsWith("tmp") ? null : item.id, caption: item.name,
+    });
+    setSharing(false);
+    if (error) { console.error("share failed:", error.message); alert("Couldn't submit — try again."); return; }
+    setShared(true);
+  };
+
+  const doEnd = async () => {
+    setBusy(true);
+    await onEnd(item.id, reason, endReason.trim());
+    setBusy(false); onClose();
+  };
+
+  const Row = ({ k, v }) => v ? (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,.05)", fontSize: 13.5 }}>
+      <span style={{ color: "var(--muted)" }}>{k}</span><span style={{ fontWeight: 600, textAlign: "right", maxWidth: "62%" }}>{v}</span>
+    </div>
+  ) : null;
+
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>{item.name}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+
+        {item.photo && <img src={item.photo} alt="" style={{ width: "100%", maxHeight: 240, objectFit: "cover", borderRadius: 14, marginBottom: 14 }} />}
+
+        <Row k="Type" v={item.type} />
+        <Row k="Status" v={<span style={{ textTransform: "capitalize" }}>{item.status || "alive"}</span>} />
+        <Row k="Price paid" v={item.price != null ? `$${item.price}` : null} />
+        <Row k="Source" v={item.source} />
+        <Row k="Size / details" v={item.size} />
+        <Row k="Acquired" v={item.acquiredAt ? fmtAcq(item.acquiredAt) : null} />
+        {!isActive && <Row k={item.status === "died" ? "Died" : "Left tank"} v={item.endedAt ? fmtAcq(item.endedAt) : null} />}
+        <Row k="Time in tank" v={daysKept != null ? `${daysKept} day${daysKept === 1 ? "" : "s"}` : null} />
+        <Row k="Notes" v={item.note} />
+        {!isActive && item.endReason && <Row k="Reason" v={item.endReason} />}
+
+        {/* Share to Reefpedia */}
+        {item.photo && item.species_id && (
+          <div className="rb-card" style={{ padding: 12, marginTop: 14, background: "rgba(63,227,255,.06)", border: "1px solid rgba(63,227,255,.25)" }}>
+            {shared ? (
+              <div style={{ fontSize: 13, color: "var(--good)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><Check size={15} /> Submitted to Reefpedia — thanks for contributing!</div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ flex: 1, fontSize: 12.5, color: "var(--muted)" }}>Share this photo to the <b style={{ color: "var(--text)" }}>{item.name}</b> Reefpedia page for other reefers.</div>
+                <button className="rb-btn" style={{ flex: "none", padding: "8px 12px", fontSize: 12.5 }} disabled={sharing} onClick={shareToLibrary}>{sharing ? "…" : "Share"}</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* End / remove flow (active only) */}
+        {isActive && !endMode && (
+          <button className="rb-btn ghost" style={{ width: "100%", marginTop: 16, padding: 12 }} onClick={() => setEndMode(true)}>
+            Mark as died / sold / removed
+          </button>
+        )}
+        {isActive && endMode && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>What happened to {item.name}?</div>
+            <div className="rb-tabs" style={{ margin: "0 0 10px", flexWrap: "wrap" }}>
+              {[["died", "Died"], ["sold", "Sold"], ["traded", "Traded"], ["removed", "Removed"]].map(([v, lbl]) => (
+                <div key={v} className={"rb-chip" + (reason === v ? " on" : "")} onClick={() => setReason(v)}>{lbl}</div>
               ))}
+            </div>
+            <input className="rb-input" placeholder={reason === "died" ? "Cause, if known (e.g. tissue recession)" : "Details (e.g. sold to @reefer for $40)"}
+              value={endReason} onChange={(e) => setEndReason(e.target.value)} />
+            <div style={{ fontSize: 11.5, color: "var(--muted-2)", margin: "8px 0 12px" }}>
+              This moves {item.name} to Past livestock and logs a journal entry. The full record is kept.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button className="rb-btn ghost" style={{ flex: 1 }} disabled={busy} onClick={() => setEndMode(false)}>Cancel</button>
+              <button className="rb-btn" style={{ flex: 2 }} disabled={busy} onClick={doEnd}>{busy ? "Saving…" : "Confirm"}</button>
             </div>
           </div>
         )}
       </div>
-      <div className="rb-card">
-        {state.livestock.length === 0 && <div className="rb-empty">Nothing in the tank yet — add your first coral, fish, or invert above.</div>}
-        {state.livestock.map((l) => (
-          <div key={l.id} className="rb-li">
-            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.c},#0b2b3d)` }}>
-              {l.type === "Fish" ? <Fish size={20} color="#04111a" /> : l.type === "Coral" ? <Waves size={20} color="#04111a" /> : <Shell size={20} color="#04111a" />}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}><div className="nm">{l.name}</div><div className="sub">{l.type}{l.note ? " · " + l.note : ""}</div></div>
-            {removeLivestock && (
-              <span style={{ color: "var(--muted-2)", cursor: "pointer", padding: 8, flex: "none" }}
-                onClick={() => { if (confirm(`Remove ${l.name} from this tank?`)) removeLivestock(l.id); }}
-                title="Remove">✕</span>
-            )}
-          </div>
-        ))}
-      </div>
-      </>)}
     </div>
   );
 }
