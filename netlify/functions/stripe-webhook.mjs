@@ -12,6 +12,15 @@ function verify(payload, sigHeader, secret) {
   return ok && fresh;
 }
 
+async function uidFromCustomer(customer, key) {
+  // Fallback when subscription event lacks metadata.uid — read it off the Customer.
+  try {
+    const r = await fetch(`https://api.stripe.com/v1/customers/${customer}`, { headers: { Authorization: `Bearer ${key}` } });
+    const c = await r.json();
+    return (c && c.metadata && c.metadata.uid) || null;
+  } catch { return null; }
+}
+
 async function setPlan(uid, plan, customer) {
   const url = `${process.env.SUPABASE_URL}/rest/v1/profiles?id=eq.${uid}`;
   const r = await fetch(url, {
@@ -30,6 +39,7 @@ async function setPlan(uid, plan, customer) {
 export default async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
   const secret = (process.env.STRIPE_WEBHOOK_SECRET || "").trim();
+  const stripeKey = (process.env.STRIPE_SECRET_KEY || "").trim();
   if (!secret) return new Response("Webhook not configured", { status: 503 });
 
   const payload = await req.text();
@@ -48,7 +58,8 @@ export default async (req) => {
       break;
     }
     case "customer.subscription.updated": {
-      const uid = obj.metadata && obj.metadata.uid;
+      let uid = obj.metadata && obj.metadata.uid;
+      if (!uid && obj.customer) uid = await uidFromCustomer(obj.customer, stripeKey);
       if (uid) {
         const active = ["active", "trialing", "past_due"].includes(obj.status);
         await setPlan(uid, active ? "pro" : "free");
@@ -56,7 +67,8 @@ export default async (req) => {
       break;
     }
     case "customer.subscription.deleted": {
-      const uid = obj.metadata && obj.metadata.uid;
+      let uid = obj.metadata && obj.metadata.uid;
+      if (!uid && obj.customer) uid = await uidFromCustomer(obj.customer, stripeKey);
       if (uid) await setPlan(uid, "free");
       break;
     }

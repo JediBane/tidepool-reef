@@ -924,6 +924,23 @@ function TidepoolReef() {
     setRefreshing(false);
   };
   usePullToRefresh(refresh, refreshing, !!state);
+  const [justUpgraded, setJustUpgraded] = useState(false);
+  useEffect(() => {
+    if (!session || !session.user) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("upgraded") !== "1") return;
+    window.history.replaceState({}, "", window.location.pathname);
+    setJustUpgraded(true);
+    let tries = 0;
+    const tick = async () => {
+      tries += 1;
+      const fresh = await fetchAll(session.user.id).catch(() => null);
+      if (fresh) setState(fresh);
+      if (fresh && fresh.profile && fresh.profile.plan === "pro") return;
+      if (tries < 5) setTimeout(tick, 2000);
+    };
+    tick();
+  }, [session && session.user && session.user.id]);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
   AI_GATE.check = async (kind) => {
     const p = state && state.profile;
@@ -1105,6 +1122,22 @@ function TidepoolReef() {
       <style>{STYLES}</style>
 
       <UpgradeSheet open={upgradeOpen} onClose={() => setUpgradeOpen(false)} profile={state ? state.profile : {}} />
+
+      {justUpgraded && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,6,10,.8)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 20 }}
+          onClick={() => setJustUpgraded(false)}>
+          <div className="rb-card" style={{ maxWidth: 380, width: "100%", padding: 26, textAlign: "center", border: "1px solid rgba(46,230,200,.4)" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 46 }}>🎉</div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 22, marginTop: 8 }}>Welcome to <span style={{ color: "var(--teal)" }}>Pro</span>!</div>
+            <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.55, marginTop: 10 }}>
+              {state && state.profile && state.profile.plan === "pro"
+                ? "Unlimited DeepDive and ReefID are now unlocked. Dive in. 🪸"
+                : "Your payment went through — Pro is activating now, it'll be live in a few seconds."}
+            </div>
+            <button className="rb-btn" style={{ width: "100%", marginTop: 18 }} onClick={() => setJustUpgraded(false)}>Let's go</button>
+          </div>
+        </div>
+      )}
 
       {/* pull-to-refresh indicator */}
       <div id="rb-ptr" style={{
