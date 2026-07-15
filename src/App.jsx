@@ -555,6 +555,17 @@ async function fetchAll(uid) {
 }
 
 /* AI via Netlify function proxy (key stays server-side) */
+/* ---------------- Pro gating ---------------- */
+const FREE_REEFID = 3;      // lifetime free ReefID scans
+const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
+const AI_GATE = { check: null };   // main component installs the checker
+
+/* Returns true if the call may proceed. Opens the upgrade sheet + returns false otherwise. */
+async function gateAI(kind) {
+  if (AI_GATE.check) return AI_GATE.check(kind);
+  return true;
+}
+
 async function askReefAI(messages, system) {
   const res = await fetch("/api/chat", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -781,6 +792,19 @@ function TidepoolReef() {
     setRefreshing(false);
   };
   usePullToRefresh(refresh, refreshing, !!state);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  AI_GATE.check = async (kind) => {
+    const p = state && state.profile;
+    if (!p) return false;
+    if (p.plan === "pro") return true;
+    const used = kind === "reefid" ? (p.reefid_used || 0) : (p.deepdive_used || 0);
+    const limit = kind === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
+    if (used >= limit) { setUpgradeOpen(true); return false; }
+    const { data: n, error } = await supabase.rpc("use_ai", { kind });
+    if (error) { console.error("use_ai failed:", error.message); return true; } // fail-open, log it
+    setState((s) => s ? { ...s, profile: { ...s.profile, [kind === "reefid" ? "reefid_used" : "deepdive_used"]: n } } : s);
+    return true;
+  };
   useEffect(() => {
     const el = document.getElementById("rb-ptr");
     if (!el) return;
@@ -937,7 +961,7 @@ function TidepoolReef() {
 
   const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
     library: "Reefpedia", shop: "Shop", tasks: "Tasks", reefid: "Reef ID",
-    notifications: "Notifications", messages: "Messages", purchases: "Purchases", seller: "Seller Hub", settings: "Settings" };
+    notifications: "Notifications", messages: "Messages", purchases: "Purchases", seller: "Seller Hub", settings: "Settings", admin: "Admin" };
   const isTab = ["tank", "log", "deepdive", "community", "profile"].includes(view);
   const taskCount = state.tasks.filter((t) => t.due - Date.now() < dayMs).length;
 
@@ -946,6 +970,8 @@ function TidepoolReef() {
   return (
     <div className="rb-root">
       <style>{STYLES}</style>
+
+      <UpgradeSheet open={upgradeOpen} onClose={() => setUpgradeOpen(false)} profile={state ? state.profile : {}} />
 
       {/* pull-to-refresh indicator */}
       <div id="rb-ptr" style={{
@@ -974,6 +1000,7 @@ function TidepoolReef() {
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
+        {view === "admin" && <AdminPanel state={state} />}
         {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
@@ -1022,6 +1049,7 @@ function TidepoolReef() {
               ["messages", MessageCircle, "Messages"],
               ["purchases", Receipt, "Purchases"],
               ["seller", Store, "Seller Hub"],
+              ...(state.profile.is_admin ? [["admin", Users, "Admin"]] : []),
               ["settings", Settings, "Settings"],
             ].map(([k, Icon, lbl, extra]) => (
               <div key={k} className="rb-mitem" onClick={() => go(k)}>
@@ -1204,6 +1232,106 @@ function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switch
 }
 
 /* ---------------- Profile ---------------- */
+/* ---------------- Upgrade (paywall) ---------------- */
+function UpgradeSheet({ open, onClose, profile }) {
+  const [busy, setBusy] = useState(false);
+  if (!open) return null;
+  const buy = async (plan) => {
+    setBusy(true);
+    try {
+      const r = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan, uid: profile.id, handle: profile.handle }) });
+      const d = await r.json();
+      if (d && d.url) { window.location.href = d.url; return; }
+      alert(d && d.error ? d.error : "Payments are launching soon — hang tight!");
+    } catch (e) { alert("Payments are launching soon — hang tight!"); }
+    setBusy(false);
+  };
+  const perk = (t) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13.5, marginTop: 8 }}>
+      <Check size={15} color="var(--good)" style={{ flex: "none" }} /> {t}
+    </div>
+  );
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(2,6,10,.78)", backdropFilter: "blur(6px)",
+      display: "grid", placeItems: "center", padding: 18 }} onClick={onClose}>
+      <div className="rb-card" style={{ maxWidth: 420, width: "100%", padding: 22, border: "1px solid rgba(176,108,255,.4)" }}
+        onClick={(e) => e.stopPropagation()}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: 34 }}>🤿</div>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21, marginTop: 6 }}>Tidepool <span style={{ color: "var(--violet)" }}>Pro</span></div>
+          <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 5 }}>You've used your free AI taste — unlock the full reef brain.</div>
+        </div>
+        <div style={{ margin: "14px 0 4px" }}>
+          {perk("Unlimited DeepDive — AI that knows YOUR tank")}
+          {perk("Unlimited ReefID photo identification")}
+          {perk("AI chart summaries on any date range")}
+          {perk("AI task scheduling")}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button className="rb-btn ghost" style={{ flex: 1, flexDirection: "column", padding: 13, gap: 2 }} disabled={busy} onClick={() => buy("monthly")}>
+            <b style={{ fontSize: 16 }}>$6.99</b><span style={{ fontSize: 11, color: "var(--muted)" }}>per month</span>
+          </button>
+          <button className="rb-btn" style={{ flex: 1.15, flexDirection: "column", padding: 13, gap: 2, position: "relative" }} disabled={busy} onClick={() => buy("annual")}>
+            <span style={{ position: "absolute", top: -9, right: 10, fontSize: 9.5, fontWeight: 800, background: "var(--violet)", color: "#fff", padding: "2px 8px", borderRadius: 20 }}>SAVE 40%</span>
+            <b style={{ fontSize: 16 }}>$49.99</b><span style={{ fontSize: 11, opacity: .8 }}>per year</span>
+          </button>
+        </div>
+        <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", marginTop: 12, cursor: "pointer" }} onClick={onClose}>Maybe later</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Admin ---------------- */
+function AdminPanel({ state }) {
+  const [users, setUsers] = useState(null);
+  const [err, setErr] = useState("");
+  const load = async () => {
+    const { data, error } = await supabase.rpc("admin_list_users");
+    if (error) { setErr(error.message); return; }
+    setUsers(data || []);
+  };
+  useEffect(() => { load(); }, []);
+  const setPlan = async (u, plan) => {
+    const { error } = await supabase.rpc("admin_set_plan", { target: u.id, new_plan: plan });
+    if (error) { alert(error.message); return; }
+    setUsers((list) => list.map((x) => x.id === u.id ? { ...x, plan } : x));
+  };
+  if (err) return <div className="rb-card rb-empty" style={{ padding: 30 }}>Admin error: {err}</div>;
+  if (!users) return <div className="rb-empty" style={{ padding: 40 }}>Loading users…</div>;
+  const pro = users.filter((u) => u.plan === "pro").length;
+  return (
+    <div className="rb-fadein">
+      <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 14, textAlign: "center", marginTop: 4 }}>
+        <div className="rb-stat"><div className="v">{users.length}</div><div className="k">Users</div></div>
+        <div className="rb-stat"><div className="v">{pro}</div><div className="k">Pro</div></div>
+        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.reefid_used || 0), 0)}</div><div className="k">ReefIDs used</div></div>
+        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.deepdive_used || 0), 0)}</div><div className="k">AI msgs used</div></div>
+      </div>
+      <div className="rb-h2"><Users size={16} color="var(--aqua)" /> Users <small>{users.length}</small></div>
+      <div className="rb-card">
+        {users.map((u) => (
+          <div key={u.id} className="rb-li" style={{ alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">@{u.handle} {u.is_admin && <span style={{ color: "var(--gold)", fontSize: 10.5 }}>ADMIN</span>}</div>
+              <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{u.email || "—"}</div>
+              <div style={{ fontSize: 10.5, color: "var(--muted-2)", marginTop: 2 }}>
+                joined {new Date(u.joined).toLocaleDateString()} · {u.reefid_used || 0} IDs · {u.deepdive_used || 0} AI msgs · {u.pearls || 0} pearls
+              </div>
+            </div>
+            <button className={"rb-btn" + (u.plan === "pro" ? "" : " ghost")} style={{ flex: "none", padding: "7px 13px", fontSize: 12 }}
+              onClick={() => setPlan(u, u.plan === "pro" ? "free" : "pro")}>
+              {u.plan === "pro" ? "PRO ✓" : "Free"}
+            </button>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted-2)", margin: "10px 4px" }}>Tap a plan button to toggle Pro (comps, refunds, founding members).</div>
+    </div>
+  );
+}
+
 /* ---------------- Achievements ---------------- */
 const ACHIEVEMENTS = [
   { id: "first_tank",   icon: "🪣", name: "Wet Hands",        desc: "Set up your first tank",                tier: "bronze", check: (s) => s.tanks.length >= 1 },
@@ -2381,6 +2509,7 @@ function AIScheduleSheet({ state, latest, onClose, onAdd }) {
   const t = state.tank;
 
   const ask = async () => {
+    if (!(await gateAI("deepdive"))) return;
     setBusy(true); setErr("");
     const params = latest
       ? PARAMS.map((p) => `${p.label} ${latest[p.key]}${p.unit} (${statusOf(p, latest[p.key])})`).join(", ")
@@ -2512,6 +2641,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
 
   const summarize = async () => {
     if (!stats) return;
+    if (!(await gateAI("deepdive"))) return;
     setAiBusy(true);
     const series = chartData.map((d) => `${fmtDate(d.date)}: ${d.v}`).join(", ");
     const prompt =
@@ -2745,6 +2875,7 @@ function ReefID() {
     im.src = url;
   };
   const identify = async () => {
+    if (!(await gateAI("reefid"))) return;
     if (!img) return; setBusy(true); setResult("");
     try {
       const res = await fetch("/api/chat", {
@@ -2812,6 +2943,7 @@ function DeepDive({ state, latest, issues, switchTank }) {
     setMsgs(history); setInput(""); setBusy(true);
     try {
       const apiMsgs = [...msgs.map((m) => ({ role: m.role, content: m.content })), { role: "user", content: text }];
+      if (!(await gateAI("deepdive"))) { setBusy(false); return; }
       const reply = await askReefAI(apiMsgs, SYS);
       setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
     } catch (e) { setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
