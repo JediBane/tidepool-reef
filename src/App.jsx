@@ -27,7 +27,10 @@ const STYLES = `
   --text:#e9f7fc;--muted:#84a8ba;--muted-2:#5b8194;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-.rb-root{font-family:'Hanken Grotesk',sans-serif;color:var(--text);min-height:100vh;position:relative;overflow-x:hidden;overscroll-behavior-y:contain;
+html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
+#root{height:100%;}
+.rb-root{font-family:'Hanken Grotesk',sans-serif;color:var(--text);height:100dvh;position:relative;
+  overflow-y:auto;overflow-x:hidden;overscroll-behavior-y:contain;-webkit-overflow-scrolling:touch;
   background:radial-gradient(120% 80% at 50% -10%,rgba(63,227,255,.18),transparent 55%),
     radial-gradient(90% 60% at 90% 110%,rgba(176,108,255,.12),transparent 60%),
     radial-gradient(70% 50% at 0% 100%,rgba(255,122,92,.08),transparent 55%),
@@ -683,53 +686,58 @@ export default function TidepoolReefApp() {
   return <ErrorBoundary><TidepoolReef /></ErrorBoundary>;
 }
 
-/* Pull-to-refresh: only engages at the top of the page, mimics native rubber-band. */
-function usePullToRefresh(onRefresh, refreshing) {
+/* Pull-to-refresh — listens on the app's own scroll container (.rb-root) so iOS Safari's
+   native bounce/PTR can't hijack the gesture. Engages only at scrollTop 0. */
+function usePullToRefresh(onRefresh, refreshing, ready) {
+  const cb = useRef(onRefresh); cb.current = onRefresh;
+  const busy = useRef(refreshing); busy.current = refreshing;
   useEffect(() => {
+    const scroller = document.querySelector(".rb-root");
+    if (!scroller) return;
     let startY = 0, pulling = false, pulled = 0;
     const THRESHOLD = 70;
     const indicator = () => document.getElementById("rb-ptr");
 
     const setPull = (px) => {
-      const el = indicator();
-      if (!el) return;
+      const el = indicator(); if (!el) return;
       const p = Math.min(px, 90);
       el.style.transform = `translateX(-50%) translateY(${p - 46}px)`;
       el.style.opacity = String(Math.min(1, px / THRESHOLD));
-      el.querySelector("svg").style.transform = `rotate(${px * 3}deg)`;
+      const svg = el.querySelector("svg"); if (svg) svg.style.transform = `rotate(${px * 3}deg)`;
     };
-    const reset = () => { const el = indicator(); if (el) { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; } };
+    const reset = () => { const el = indicator(); if (el && !busy.current) { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; } };
 
     const onStart = (e) => {
-      // only when scrolled to the very top
-      if (window.scrollY > 2) { pulling = false; return; }
-      startY = e.touches[0].clientY; pulling = true; pulled = 0;
+      pulling = scroller.scrollTop <= 0 && !busy.current;
+      if (pulling) { startY = e.touches[0].clientY; pulled = 0; }
     };
     const onMove = (e) => {
-      if (!pulling || refreshing) return;
+      if (!pulling) return;
       const dy = e.touches[0].clientY - startY;
-      if (dy > 0 && window.scrollY <= 2) {
-        pulled = dy * 0.5;              // rubber-band damping
-        setPull(pulled);
-        if (dy > 6) e.preventDefault();  // stop the page from also scrolling
-      }
+      if (dy <= 0) { setPull(0); return; }
+      if (scroller.scrollTop > 0) { pulling = false; reset(); return; }
+      e.preventDefault();               // own the gesture from the first downward pixel
+      pulled = dy * 0.5;                // rubber-band damping
+      setPull(pulled);
     };
     const onEnd = () => {
       if (!pulling) return;
       pulling = false;
-      if (pulled >= THRESHOLD && !refreshing) onRefresh();
+      if (pulled >= THRESHOLD && !busy.current) cb.current();
       reset();
     };
 
-    document.addEventListener("touchstart", onStart, { passive: true });
-    document.addEventListener("touchmove", onMove, { passive: false });
-    document.addEventListener("touchend", onEnd, { passive: true });
+    scroller.addEventListener("touchstart", onStart, { passive: true });
+    scroller.addEventListener("touchmove", onMove, { passive: false });
+    scroller.addEventListener("touchend", onEnd, { passive: true });
+    scroller.addEventListener("touchcancel", onEnd, { passive: true });
     return () => {
-      document.removeEventListener("touchstart", onStart);
-      document.removeEventListener("touchmove", onMove);
-      document.removeEventListener("touchend", onEnd);
+      scroller.removeEventListener("touchstart", onStart);
+      scroller.removeEventListener("touchmove", onMove);
+      scroller.removeEventListener("touchend", onEnd);
+      scroller.removeEventListener("touchcancel", onEnd);
     };
-  }, [onRefresh, refreshing]);
+  }, [ready]);   // rebind when the main UI (its .rb-root) mounts; callbacks via refs
 }
 
 function TidepoolReef() {
@@ -766,7 +774,7 @@ function TidepoolReef() {
     } catch (e) { console.error("refresh failed", e); }
     setRefreshing(false);
   };
-  usePullToRefresh(refresh, refreshing);
+  usePullToRefresh(refresh, refreshing, !!state);
 
   const latest = useMemo(() => (state && state.history.length ? state.history[state.history.length - 1] : null), [state]);
   const award = async (n) => {
