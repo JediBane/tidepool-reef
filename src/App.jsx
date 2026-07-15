@@ -1133,6 +1133,18 @@ function TidepoolReef() {
     }
     award(3);
   };
+  const markListingSold = async (id) => {
+    const prev = state.listings;
+    setState((s) => ({ ...s, listings: s.listings.map((l) => l.id === id ? { ...l, status: "sold" } : l) }));
+    const { error } = await supabase.from("listings").update({ status: "sold" }).eq("id", id);
+    if (error) { console.error("markSold failed:", error.message); setState((s) => ({ ...s, listings: prev })); alert("Couldn't update — try again."); }
+  };
+  const removeListing = async (id) => {
+    const prev = state.listings;
+    setState((s) => ({ ...s, listings: s.listings.filter((l) => l.id !== id) }));
+    const { error } = await supabase.from("listings").delete().eq("id", id);
+    if (error) { console.error("removeListing failed:", error.message); setState((s) => ({ ...s, listings: prev })); alert("Couldn't remove — try again."); }
+  };
   const addPost = async (body, tag = "Update") => {
     const { data, error } = await supabase.from("posts")
       .insert({ author_id: state.uid, tag, body }).select().single();
@@ -1302,7 +1314,7 @@ function TidepoolReef() {
         {view === "notifications" && <Notifications uid={session.user.id} />}
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
-        {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell") }} />}
+        {view === "seller" && <Seller {...{ state, openSell: () => setSheet("sell"), markSold: markListingSold, removeListing }} />}
         {view === "settings" && <SettingsView {...{ state, setTankSharing, createTank, renameTank, deleteTank }} />}
       </div>
 
@@ -3875,8 +3887,10 @@ function Purchases() {
     </div></div>
   );
 }
-function Seller({ state, openSell }) {
-  const mine = state.listings.filter((l) => l.seller === state.profile.handle);
+function Seller({ state, openSell, markSold, removeListing }) {
+  const mine = state.listings.filter((l) => l.sellerId === state.uid || l.seller === state.profile.handle);
+  const active = mine.filter((l) => l.status !== "sold");
+  const sold = mine.filter((l) => l.status === "sold");
   return (
     <div className="rb-fadein">
       <div className="rb-card rb-phero" style={{ padding: 20, marginTop: 6 }}>
@@ -3885,8 +3899,8 @@ function Seller({ state, openSell }) {
           <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20 }}>Seller Hub</div>
           <div style={{ color: "var(--muted)", fontSize: 13, marginTop: 4 }}>Sell frags & gear to the local reef community.</div>
           <div className="rb-stats">
-            <div className="rb-stat"><div className="v">{mine.length}</div><div className="k">Active</div></div>
-            <div className="rb-stat"><div className="v">0</div><div className="k">Sold</div></div>
+            <div className="rb-stat"><div className="v">{active.length}</div><div className="k">Active</div></div>
+            <div className="rb-stat"><div className="v">{sold.length}</div><div className="k">Sold</div></div>
             <div className="rb-stat"><div className="v">5.0</div><div className="k">Rating</div></div>
           </div>
         </div>
@@ -3894,14 +3908,27 @@ function Seller({ state, openSell }) {
       <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 13 }} onClick={openSell}><Tag size={16} /> List an item</button>
       <div className="rb-h2"><Store size={16} color="var(--aqua)" /> Your listings</div>
       <div className="rb-card">
-        {mine.length === 0 && <div className="rb-empty">No active listings yet. Tap “List an item” to post your first frag.</div>}
-        {mine.map((l) => (
-          <div key={l.id} className="rb-li">
-            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}><Tag size={18} color="#04111a" /></div>
-            <div><div className="nm">{l.title}</div><div className="sub">{l.cat}</div></div>
-            <div style={{ marginLeft: "auto", fontFamily: "Bricolage Grotesque", fontWeight: 800, color: "var(--aqua)" }}>${l.price}</div>
-          </div>
-        ))}
+        {mine.length === 0 && <div className="rb-empty">No listings yet. Tap "List an item" to post your first frag.</div>}
+        {mine.map((l) => {
+          const isSold = l.status === "sold";
+          return (
+            <div key={l.id} className="rb-li" style={{ opacity: isSold ? 0.6 : 1 }}>
+              <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${l.g[0]},${l.g[1]})` }}><Tag size={18} color="#04111a" /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="nm">{l.title} {isSold && <span style={{ fontSize: 10, color: "var(--muted-2)", fontWeight: 700 }}>SOLD</span>}</div>
+                <div className="sub">{l.cat} · ${l.price}</div>
+              </div>
+              {!isSold && markSold && (
+                <span style={{ color: "var(--good)", cursor: "pointer", padding: "6px 8px", fontSize: 12, flex: "none" }}
+                  onClick={() => { if (confirm(`Mark "${l.title}" as sold?`)) markSold(l.id); }}>Sold</span>
+              )}
+              {removeListing && (
+                <span style={{ color: "var(--bad)", cursor: "pointer", padding: "6px 8px", fontSize: 12, flex: "none" }}
+                  onClick={() => { if (confirm(`Remove "${l.title}"?`)) removeListing(l.id); }}>✕</span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
