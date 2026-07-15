@@ -1136,131 +1136,105 @@ function computeAchievements(state, derived) {
   return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived) }));
 }
 
-function Profile({ state, fish, corals, issues, go, myPosts, switchTank, setSheet, setLibItem }) {
-  const [tab, setTab] = useState("tanks");
+function Profile({ state, fish, corals, issues, go, myPosts, switchTank }) {
   const derived = { corals, fish, myPosts: myPosts.length };
   const achievements = computeAchievements(state, derived);
   const earned = achievements.filter((a) => a.earned);
+  const locked = achievements.filter((a) => !a.earned);
+  const ordered = [...earned, ...locked];   // earned first
   const gradFor = (i) => PALETTE[i % PALETTE.length];
 
   return (
     <div className="rb-fadein">
-      {/* Hero */}
-      <div className="rb-card rb-phero">
-        <div className="glow" />
-        <CoralAvatar size={84} />
-        <div className="h">{state.profile.display_name || state.profile.handle}</div>
-        <div className="ha">@{state.profile.handle}</div>
-        <div className="rb-dloc" style={{ justifyContent: "center", marginTop: 8 }}><MapPin size={13} /> {state.profile.location || "Florida, United States"}</div>
-        <div className="rb-badges">
-          <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)" }}>Reefing since {state.profile.reefing_since || state.tank.since}</span>
-          <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)" }}><Award size={12} /> {earned.length} badges</span>
-        </div>
-        <div className="rb-stats">
-          <div className="rb-stat"><div className="v">{state.tanks.length}</div><div className="k">Tank{state.tanks.length !== 1 ? "s" : ""}</div></div>
-          <div className="rb-stat"><div className="v">{fish}</div><div className="k">Fish</div></div>
-          <div className="rb-stat"><div className="v">{corals}</div><div className="k">Corals</div></div>
-          <div className="rb-stat"><div className="v">{state.pearls || 0}</div><div className="k">Pearls</div></div>
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-          <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
-          <button className="rb-btn" style={{ flex: 1 }} onClick={() => go("community")}><PenSquare size={15} /> Create Post</button>
+      {/* Compact horizontal hero */}
+      <div className="rb-card" style={{ padding: 14, display: "flex", gap: 14, alignItems: "center", marginTop: 4 }}>
+        <div style={{ flex: "none" }}><CoralAvatar size={60} /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>{state.profile.display_name || state.profile.handle}</div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 1 }}>@{state.profile.handle} · {state.profile.location || "Florida, US"}</div>
+          <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+            <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)", fontSize: 11 }}>Since {state.profile.reefing_since || state.tank.since}</span>
+            <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)", fontSize: 11 }}><Award size={11} /> {earned.length} badges</span>
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="rb-tabs" style={{ marginTop: 16 }}>
-        {[["tanks", "Tanks"], ["achievements", "Achievements"], ["activity", "Activity"]].map(([k, l]) => (
-          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</div>
+      {/* Stat bar */}
+      <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: "12px 8px", marginTop: 10, textAlign: "center" }}>
+        {[[state.tanks.length, state.tanks.length === 1 ? "Tank" : "Tanks"], [fish, "Fish"], [corals, "Corals"], [state.pearls || 0, "Pearls"]].map(([v, k], i) => (
+          <div key={i} className="rb-stat"><div className="v">{v}</div><div className="k">{k}</div></div>
         ))}
       </div>
 
-      {/* TANKS */}
-      {tab === "tanks" && (
-        <div className="rb-mgrid" style={{ marginTop: 4 }}>
-          {state.tanks.map((t, i) => {
-            const active = t.id === state.tankId;
-            return (
-              <div key={t.id} className="rb-card rb-mcard" style={{ overflow: "hidden", cursor: "pointer",
-                border: active ? "1px solid var(--aqua)" : undefined }}
-                onClick={() => { switchTank(t.id); go("tank"); }}>
-                <div style={{ height: 96, position: "relative", background: `linear-gradient(150deg, ${gradFor(i)[0]}, ${gradFor(i)[1]})` }}>
-                  <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.18), transparent 60%)" }} />
-                  <Waves size={30} color="rgba(4,17,26,.4)" style={{ position: "absolute", bottom: 12, right: 12 }} />
-                  {active && <span style={{ position: "absolute", top: 8, left: 8, fontSize: 10, fontWeight: 700, background: "rgba(3,8,12,.7)", color: "var(--aqua)", padding: "3px 8px", borderRadius: 20 }}>ACTIVE</span>}
-                </div>
-                <div className="rb-mbody">
-                  <div className="t">{t.name}</div>
-                  <div className="sci" style={{ fontStyle: "normal" }}>{t.model}</div>
-                  <div className="rb-care"><span>{t.volume} gal</span><span>since {t.since}</span></div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
+        <button className="rb-btn" style={{ flex: 1 }} onClick={() => go("community")}><PenSquare size={15} /> Create Post</button>
+      </div>
 
-      {/* ACHIEVEMENTS */}
-      {tab === "achievements" && (
-        <>
-          <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "8px 2px 12px" }}>
-            {earned.length} of {achievements.length} unlocked — keep logging, stocking, and posting to earn more.
-          </div>
-          <div className="rb-mgrid">
-            {achievements.map((a) => {
-              const ts = TIER_STYLE[a.tier];
-              return (
-                <div key={a.id} className="rb-card" style={{ padding: 16, textAlign: "center", opacity: a.earned ? 1 : 0.4,
-                  border: a.earned ? `1px solid ${ts.bd}` : "1px solid var(--brd)", filter: a.earned ? "none" : "grayscale(1)" }}>
-                  <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 8 }}>{a.icon}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{a.name}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4, lineHeight: 1.4 }}>{a.desc}</div>
-                  <div style={{ marginTop: 10 }}>
-                    <span className="rb-badge" style={{ background: ts.bg, color: ts.c, border: `1px solid ${ts.bd}`, fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px" }}>
-                      {a.earned ? a.tier : "locked"}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </>
-      )}
+      {/* My Tanks — 2-up grid */}
+      <div className="rb-h2"><Waves size={16} color="var(--teal)" /> My Tanks <small>{state.tanks.length}</small></div>
+      <div className="rb-mgrid" style={{ marginTop: 0 }}>
+        {state.tanks.map((t, i) => {
+          const active = t.id === state.tankId;
+          return (
+            <div key={t.id} className="rb-card rb-mcard" style={{ overflow: "hidden", cursor: "pointer", border: active ? "1px solid var(--aqua)" : undefined }}
+              onClick={() => { switchTank(t.id); go("tank"); }}>
+              <div style={{ height: 72, position: "relative", background: `linear-gradient(150deg, ${gradFor(i)[0]}, ${gradFor(i)[1]})` }}>
+                <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.18), transparent 60%)" }} />
+                <Waves size={26} color="rgba(4,17,26,.4)" style={{ position: "absolute", bottom: 10, right: 10 }} />
+                {active && <span style={{ position: "absolute", top: 8, left: 8, fontSize: 9.5, fontWeight: 700, background: "rgba(3,8,12,.7)", color: "var(--aqua)", padding: "2px 7px", borderRadius: 20 }}>ACTIVE</span>}
+              </div>
+              <div className="rb-mbody">
+                <div className="t">{t.name}</div>
+                <div className="sci" style={{ fontStyle: "normal" }}>{t.model}</div>
+                <div className="rb-care"><span>{t.volume} gal</span><span>since {t.since}</span></div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
-      {/* ACTIVITY */}
-      {tab === "activity" && (
-        <>
-          <div className="rb-h2" style={{ marginTop: 10 }}><Bell size={15} color="var(--coral)" /> Tank health <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
-          <div className="rb-card" style={{ marginBottom: 6 }}>
-            {issues.length === 0 && <div className="rb-empty">All parameters in range across your tanks. 🪸</div>}
-            {issues.map((p) => (
-              <div key={p.key} className="rb-li" onClick={() => go("log")}>
-                <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--warn),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
-                <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
-                <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
-              </div>
-            ))}
-          </div>
+      {/* Achievements — earned-first grid */}
+      <div className="rb-h2"><Award size={16} color="var(--gold)" /> Achievements <small>{earned.length} / {achievements.length}</small></div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+        {ordered.map((a) => {
+          const ts = TIER_STYLE[a.tier];
+          return (
+            <div key={a.id} className="rb-card" title={a.name + " — " + a.desc}
+              style={{ padding: "12px 6px", textAlign: "center", opacity: a.earned ? 1 : 0.38,
+                border: a.earned ? `1px solid ${ts.bd}` : "1px solid var(--brd)", filter: a.earned ? "none" : "grayscale(1)" }}>
+              <div style={{ fontSize: 26, lineHeight: 1 }}>{a.icon}</div>
+              <div style={{ fontWeight: 700, fontSize: 10.5, marginTop: 5, lineHeight: 1.2 }}>{a.name}</div>
+            </div>
+          );
+        })}
+      </div>
 
-          <div className="rb-h2"><PenSquare size={15} color="var(--aqua)" /> My posts <small>{myPosts.length}</small></div>
-          <div className="rb-card">
-            {myPosts.length === 0 && (
-              <div className="rb-empty" style={{ padding: "26px 20px" }}>
-                You haven't posted yet. <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => go("community")}>Share a tank update</span>.
-              </div>
-            )}
-            {myPosts.map((post) => (
-              <div key={post.id} className="rb-li" style={{ alignItems: "flex-start", cursor: "pointer" }} onClick={() => go("community")}>
-                <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55`, flex: "none" }}>{post.tag}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="sub" style={{ color: "#d8eef5", lineHeight: 1.5 }}>{post.body}</div>
-                  <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 3 }}>{post.time} · {post.likes} likes · {post.comments} comments</div>
-                </div>
-              </div>
-            ))}
+      {/* Activity */}
+      <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Activity <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
+      <div className="rb-card">
+        {issues.length === 0 && <div className="rb-empty">All parameters in range across your tanks. 🪸</div>}
+        {issues.map((p) => (
+          <div key={p.key} className="rb-li" style={{ cursor: "pointer" }} onClick={() => go("log")}>
+            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--warn),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
+            <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+            <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
           </div>
-        </>
-      )}
+        ))}
+        {myPosts.slice(0, 4).map((post) => (
+          <div key={post.id} className="rb-li" style={{ alignItems: "flex-start", cursor: "pointer" }} onClick={() => go("community")}>
+            <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--aqua),#0b2b3d)", flex: "none" }}><PenSquare size={18} color="#04111a" /></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">You posted <span style={{ color: post.tagc }}>{post.tag}</span></div>
+              <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{post.body}</div>
+              <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 2 }}>{post.time} · {post.likes} likes · {post.comments} comments</div>
+            </div>
+          </div>
+        ))}
+        {issues.length === 0 && myPosts.length === 0 && (
+          <div className="rb-empty" style={{ padding: "20px" }}>Nothing to report — <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => go("community")}>share a tank update</span>.</div>
+        )}
+      </div>
     </div>
   );
 }
