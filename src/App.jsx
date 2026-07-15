@@ -488,7 +488,7 @@ async function fetchAll(uid) {
   }
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
   const active = tanksAll.find((t) => t.id === savedId) || tanksAll[0];
-  const [children, mr, sr, allLikes, kr, cm, counts, pf] = await Promise.all([
+  const [children, mr, sr, allLikes, kr, cm, counts, pf, allStock, readingCount] = await Promise.all([
     fetchTankChildren(active.id),
     supabase.from("listings").select("*").eq("status", "active").order("created_at", { ascending: false }).limit(50),
     supabase.from("posts").select("*").order("created_at", { ascending: false }).limit(50),
@@ -497,6 +497,8 @@ async function fetchAll(uid) {
     supabase.from("post_comments").select("post_id"),
     fetchSpeciesCounts(),
     supabase.from("profiles").select("id, handle, display_name"),
+    supabase.from("livestock").select("kind, species_id, tank_id, tanks!inner(owner_id)").eq("tanks.owner_id", uid),
+    supabase.from("parameters").select("id, tanks!inner(owner_id)", { count: "exact", head: true }).eq("tanks.owner_id", uid),
   ]);
   // Surface failures instead of silently rendering an empty feed.
   [["listings", mr], ["posts", sr], ["likes", allLikes], ["profiles", pf]].forEach(([label, r]) => {
@@ -517,6 +519,13 @@ async function fetchAll(uid) {
     pearls: (profile && profile.pearls) != null ? profile.pearls : 100,
     tanks: tanksAll.map(shapeTank),
     speciesCounts: counts || {},
+    totals: {
+      livestock: (allStock.data || []).length,
+      corals: (allStock.data || []).filter((l) => l.kind === "Coral").length,
+      fish: (allStock.data || []).filter((l) => l.kind === "Fish").length,
+      linked: (allStock.data || []).filter((l) => l.species_id).length,
+      readings: readingCount.count || 0,
+    },
     tankId: active.id,
     tank: shapeTank(active),
     ...children,
@@ -839,7 +848,7 @@ export default function TidepoolReef() {
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, addLogEntry, switchTank }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid }} />}
-        {view === "profile" && <Profile {...{ state, fish, corals, issues, go }} />}
+        {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
@@ -1069,12 +1078,16 @@ function LogView({ state, latest, sel, setSel, addLivestock, addLogEntry, switch
 }
 
 /* ---------------- Profile ---------------- */
-function Profile({ state, fish, corals, issues, go }) {
-  const t = state.tank;
+function Profile({ state, fish, corals, issues, go, myPosts, switchTank, setSheet, setLibItem }) {
+  const [tab, setTab] = useState("tanks");
+  const derived = { corals, fish, myPosts: myPosts.length };
+  const achievements = computeAchievements(state, derived);
+  const earned = achievements.filter((a) => a.earned);
+  const gradFor = (i) => PALETTE[i % PALETTE.length];
+
   return (
     <div className="rb-fadein">
-      <div className="rb-cols2 wide-40-60">
-      <div>
+      {/* Hero */}
       <div className="rb-card rb-phero">
         <div className="glow" />
         <CoralAvatar size={84} />
@@ -1083,52 +1096,113 @@ function Profile({ state, fish, corals, issues, go }) {
         <div className="rb-dloc" style={{ justifyContent: "center", marginTop: 8 }}><MapPin size={13} /> {state.profile.location || "Florida, United States"}</div>
         <div className="rb-badges">
           <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)" }}>Reefing since {state.profile.reefing_since || state.tank.since}</span>
-          <span className="rb-badge" style={{ background: "rgba(176,108,255,.18)", color: "#d7b6ff", border: "1px solid rgba(176,108,255,.45)" }}><Sparkles size={12} /> DeepDive</span>
-          <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)" }}><Award size={12} /> Founding Reefer</span>
+          <span className="rb-badge" style={{ background: "rgba(255,194,77,.16)", color: "#ffd470", border: "1px solid rgba(255,194,77,.5)" }}><Award size={12} /> {earned.length} badges</span>
         </div>
         <div className="rb-stats">
           <div className="rb-stat"><div className="v">{state.tanks.length}</div><div className="k">Tank{state.tanks.length !== 1 ? "s" : ""}</div></div>
           <div className="rb-stat"><div className="v">{fish}</div><div className="k">Fish</div></div>
           <div className="rb-stat"><div className="v">{corals}</div><div className="k">Corals</div></div>
+          <div className="rb-stat"><div className="v">{state.pearls || 0}</div><div className="k">Pearls</div></div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
+          <button className="rb-btn" style={{ flex: 1 }} onClick={() => go("community")}><PenSquare size={15} /> Create Post</button>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
-        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("seller")}><Store size={15} /> Seller Hub</button>
-        <button className="rb-btn ghost" style={{ flex: 1 }} onClick={() => go("community")}><PenSquare size={15} /> Create Post</button>
-      </div>
+      {/* Tabs */}
+      <div className="rb-tabs" style={{ marginTop: 16 }}>
+        {[["tanks", "Tanks"], ["achievements", "Achievements"], ["activity", "Activity"]].map(([k, l]) => (
+          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</div>
+        ))}
       </div>
 
-      <div>
-      <div className="rb-h2"><Waves size={16} color="var(--teal)" /> My Tank <small>{t.model}</small></div>
-      <div className="rb-tankhero">
-        <div className="light" /><div className="rock" />
-        <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
-        <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
-        <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
-        <div className="acts">
-          <div onClick={() => go("log")}><Notebook size={17} color="var(--text)" /></div>
-          <div onClick={() => go("log")}><FlaskConical size={17} color="var(--text)" /></div>
-          <div onClick={() => go("community")}><PenSquare size={17} color="var(--text)" /></div>
+      {/* TANKS */}
+      {tab === "tanks" && (
+        <div className="rb-mgrid" style={{ marginTop: 4 }}>
+          {state.tanks.map((t, i) => {
+            const active = t.id === state.tankId;
+            return (
+              <div key={t.id} className="rb-card rb-mcard" style={{ overflow: "hidden", cursor: "pointer",
+                border: active ? "1px solid var(--aqua)" : undefined }}
+                onClick={() => { switchTank(t.id); go("tank"); }}>
+                <div style={{ height: 96, position: "relative", background: `linear-gradient(150deg, ${gradFor(i)[0]}, ${gradFor(i)[1]})` }}>
+                  <div style={{ position: "absolute", inset: 0, background: "radial-gradient(120% 80% at 50% 0%, rgba(255,255,255,.18), transparent 60%)" }} />
+                  <Waves size={30} color="rgba(4,17,26,.4)" style={{ position: "absolute", bottom: 12, right: 12 }} />
+                  {active && <span style={{ position: "absolute", top: 8, left: 8, fontSize: 10, fontWeight: 700, background: "rgba(3,8,12,.7)", color: "var(--aqua)", padding: "3px 8px", borderRadius: 20 }}>ACTIVE</span>}
+                </div>
+                <div className="rb-mbody">
+                  <div className="t">{t.name}</div>
+                  <div className="sci" style={{ fontStyle: "normal" }}>{t.model}</div>
+                  <div className="rb-care"><span>{t.volume} gal</span><span>since {t.since}</span></div>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
 
-      <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Tank health <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
-      <div className="rb-card">
-        {issues.length === 0 && <div className="rb-empty">All parameters in range. 🪸</div>}
-        {issues.map((p) => {
-          const st = statusOf(p, state.history[state.history.length - 1][p.key]);
-          return (
-            <div key={p.key} className="rb-li" onClick={() => go("log")}>
-              <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
-              <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
-              <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
-            </div>
-          );
-        })}
-      </div>
-      </div>
-      </div>
+      {/* ACHIEVEMENTS */}
+      {tab === "achievements" && (
+        <>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "8px 2px 12px" }}>
+            {earned.length} of {achievements.length} unlocked — keep logging, stocking, and posting to earn more.
+          </div>
+          <div className="rb-mgrid">
+            {achievements.map((a) => {
+              const ts = TIER_STYLE[a.tier];
+              return (
+                <div key={a.id} className="rb-card" style={{ padding: 16, textAlign: "center", opacity: a.earned ? 1 : 0.4,
+                  border: a.earned ? `1px solid ${ts.bd}` : "1px solid var(--brd)", filter: a.earned ? "none" : "grayscale(1)" }}>
+                  <div style={{ fontSize: 34, lineHeight: 1, marginBottom: 8 }}>{a.icon}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{a.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4, lineHeight: 1.4 }}>{a.desc}</div>
+                  <div style={{ marginTop: 10 }}>
+                    <span className="rb-badge" style={{ background: ts.bg, color: ts.c, border: `1px solid ${ts.bd}`, fontSize: 10, textTransform: "uppercase", letterSpacing: ".5px" }}>
+                      {a.earned ? a.tier : "locked"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* ACTIVITY */}
+      {tab === "activity" && (
+        <>
+          <div className="rb-h2" style={{ marginTop: 10 }}><Bell size={15} color="var(--coral)" /> Tank health <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
+          <div className="rb-card" style={{ marginBottom: 6 }}>
+            {issues.length === 0 && <div className="rb-empty">All parameters in range across your tanks. 🪸</div>}
+            {issues.map((p) => (
+              <div key={p.key} className="rb-li" onClick={() => go("log")}>
+                <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--warn),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
+                <div><div className="nm">{p.label} drifting</div><div className="sub">{state.history[state.history.length - 1][p.key]} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+                <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
+              </div>
+            ))}
+          </div>
+
+          <div className="rb-h2"><PenSquare size={15} color="var(--aqua)" /> My posts <small>{myPosts.length}</small></div>
+          <div className="rb-card">
+            {myPosts.length === 0 && (
+              <div className="rb-empty" style={{ padding: "26px 20px" }}>
+                You haven't posted yet. <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => go("community")}>Share a tank update</span>.
+              </div>
+            )}
+            {myPosts.map((post) => (
+              <div key={post.id} className="rb-li" style={{ alignItems: "flex-start", cursor: "pointer" }} onClick={() => go("community")}>
+                <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55`, flex: "none" }}>{post.tag}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="sub" style={{ color: "#d8eef5", lineHeight: 1.5 }}>{post.body}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-2)", marginTop: 3 }}>{post.time} · {post.likes} likes · {post.comments} comments</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
