@@ -66,7 +66,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   animation:rbDraw .28s cubic-bezier(.2,.8,.2,1) both;box-shadow:-30px 0 60px -20px #000;}
 @keyframes rbDraw{from{transform:translateX(40px);opacity:.3}to{transform:none;opacity:1}}
 .rb-dhead{display:flex;flex-direction:column;align-items:center;text-align:center;padding:6px 0 18px;cursor:pointer;}
-.rb-av{border-radius:22%;display:grid;place-items:center;overflow:hidden;flex:none;}
+.rb-av{border-radius:50%;display:grid;place-items:center;overflow:hidden;flex:none;}
 .rb-dhead .h{font-family:'Bricolage Grotesque';font-weight:800;font-size:19px;margin-top:12px;}
 .rb-dloc{color:var(--muted);font-size:13px;margin-top:8px;display:flex;align-items:center;gap:4px;}
 .rb-mitem{display:flex;align-items:center;gap:14px;padding:14px 8px;border-radius:13px;cursor:pointer;font-size:15px;font-weight:600;}
