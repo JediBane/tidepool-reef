@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   LineChart, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, ReferenceArea, CartesianGrid,
 } from "recharts";
@@ -1287,47 +1288,151 @@ function UpgradeSheet({ open, onClose, profile }) {
 function AdminPanel({ state }) {
   const [users, setUsers] = useState(null);
   const [err, setErr] = useState("");
+  const [q, setQ] = useState("");
+  const [planF, setPlanF] = useState("all");     // all | pro | free
+  const [sort, setSort] = useState("newest");    // newest | active | pearls
+  const [sel, setSel] = useState(null);          // selected user for detail
+  const [detail, setDetail] = useState(null);
+
   const load = async () => {
     const { data, error } = await supabase.rpc("admin_list_users");
     if (error) { setErr(error.message); return; }
     setUsers(data || []);
   };
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (!sel) { setDetail(null); return; }
+    let alive = true;
+    supabase.rpc("admin_user_detail", { target: sel.id }).then(({ data, error }) => {
+      if (error) console.error("admin_user_detail:", error.message);
+      if (alive) setDetail(data || {});
+    });
+    return () => { alive = false; };
+  }, [sel && sel.id]);
+
   const setPlan = async (u, plan) => {
     const { error } = await supabase.rpc("admin_set_plan", { target: u.id, new_plan: plan });
     if (error) { alert(error.message); return; }
     setUsers((list) => list.map((x) => x.id === u.id ? { ...x, plan } : x));
+    if (sel && sel.id === u.id) setSel({ ...sel, plan });
   };
+  const deletePost = async (pid) => {
+    if (!confirm("Delete this post?")) return;
+    const { error } = await supabase.rpc("admin_delete_post", { pid });
+    if (error) { alert(error.message); return; }
+    setDetail((d) => d ? { ...d, recent_posts: (d.recent_posts || []).filter((p) => p.id !== pid), posts_count: (d.posts_count || 1) - 1 } : d);
+  };
+
   if (err) return <div className="rb-card rb-empty" style={{ padding: 30 }}>Admin error: {err}</div>;
   if (!users) return <div className="rb-empty" style={{ padding: 40 }}>Loading users…</div>;
+
   const pro = users.filter((u) => u.plan === "pro").length;
+  const mrr = (pro * 6.99).toFixed(0);
+  const ql = q.trim().toLowerCase();
+  const shown = users
+    .filter((u) => planF === "all" || u.plan === planF)
+    .filter((u) => !ql || (u.handle || "").toLowerCase().includes(ql) || (u.email || "").toLowerCase().includes(ql) || (u.display_name || "").toLowerCase().includes(ql))
+    .sort((a, b) => {
+      if (sort === "active") return ((b.reefid_used || 0) + (b.deepdive_used || 0)) - ((a.reefid_used || 0) + (a.deepdive_used || 0));
+      if (sort === "pearls") return (b.pearls || 0) - (a.pearls || 0);
+      return new Date(b.joined) - new Date(a.joined);
+    });
+  const fmtD = (d) => d ? new Date(d).toLocaleDateString() : "never";
+
   return (
     <div className="rb-fadein">
-      <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 14, textAlign: "center", marginTop: 4 }}>
+      {/* stats */}
+      <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 14, textAlign: "center", marginTop: 4, flexWrap: "wrap", gap: 8 }}>
         <div className="rb-stat"><div className="v">{users.length}</div><div className="k">Users</div></div>
         <div className="rb-stat"><div className="v">{pro}</div><div className="k">Pro</div></div>
-        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.reefid_used || 0), 0)}</div><div className="k">ReefIDs used</div></div>
-        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.deepdive_used || 0), 0)}</div><div className="k">AI msgs used</div></div>
+        <div className="rb-stat"><div className="v">${mrr}</div><div className="k">Est. MRR</div></div>
+        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.reefid_used || 0), 0)}</div><div className="k">ReefIDs</div></div>
+        <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.deepdive_used || 0), 0)}</div><div className="k">AI msgs</div></div>
       </div>
-      <div className="rb-h2"><Users size={16} color="var(--aqua)" /> Users <small>{users.length}</small></div>
+
+      {/* search + filters */}
+      <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <input className="rb-input" placeholder="Search handle, name, or email…" value={q} onChange={(e) => setQ(e.target.value)} style={{ flex: "1 1 220px" }} />
+      </div>
+      <div className="rb-tabs" style={{ margin: "10px 0 4px", flexWrap: "wrap" }}>
+        {[["all", "All"], ["pro", "Pro"], ["free", "Free"]].map(([k, l]) => (
+          <div key={k} className={"rb-chip" + (planF === k ? " on" : "")} onClick={() => setPlanF(k)}>{l}</div>
+        ))}
+        <span style={{ width: 10 }} />
+        {[["newest", "Newest"], ["active", "Most active"], ["pearls", "Pearls"]].map(([k, l]) => (
+          <div key={k} className={"rb-chip" + (sort === k ? " on" : "")} onClick={() => setSort(k)}>{l}</div>
+        ))}
+      </div>
+
+      <div className="rb-h2"><Users size={16} color="var(--aqua)" /> Users <small>{shown.length} of {users.length}</small></div>
       <div className="rb-card">
-        {users.map((u) => (
-          <div key={u.id} className="rb-li" style={{ alignItems: "center" }}>
+        {shown.length === 0 && <div className="rb-empty" style={{ padding: 24 }}>No users match.</div>}
+        {shown.map((u) => (
+          <div key={u.id} className="rb-li" style={{ alignItems: "center", cursor: "pointer" }} onClick={() => setSel(u)}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="nm">@{u.handle} {u.is_admin && <span style={{ color: "var(--gold)", fontSize: 10.5 }}>ADMIN</span>}</div>
               <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{u.email || "—"}</div>
               <div style={{ fontSize: 10.5, color: "var(--muted-2)", marginTop: 2 }}>
-                joined {new Date(u.joined).toLocaleDateString()} · {u.reefid_used || 0} IDs · {u.deepdive_used || 0} AI msgs · {u.pearls || 0} pearls
+                joined {fmtD(u.joined)} · {u.reefid_used || 0} IDs · {u.deepdive_used || 0} AI · {u.pearls || 0} pearls
               </div>
             </div>
-            <button className={"rb-btn" + (u.plan === "pro" ? "" : " ghost")} style={{ flex: "none", padding: "7px 13px", fontSize: 12 }}
-              onClick={() => setPlan(u, u.plan === "pro" ? "free" : "pro")}>
-              {u.plan === "pro" ? "PRO ✓" : "Free"}
-            </button>
+            <span className="rb-badge" style={{ flex: "none", background: u.plan === "pro" ? "rgba(46,230,200,.15)" : "rgba(255,255,255,.05)",
+              color: u.plan === "pro" ? "var(--teal)" : "var(--muted)", border: `1px solid ${u.plan === "pro" ? "rgba(46,230,200,.4)" : "var(--brd)"}` }}>
+              {u.plan === "pro" ? "PRO" : "Free"}
+            </span>
+            <ChevronRight size={17} color="var(--muted)" style={{ flex: "none" }} />
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 11.5, color: "var(--muted-2)", margin: "10px 4px" }}>Tap a plan button to toggle Pro (comps, refunds, founding members).</div>
+
+      {/* customer detail — portal so it can't be trapped by animated ancestors */}
+      {sel && createPortal(
+        <div style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(2,6,10,.78)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 16 }} onClick={() => setSel(null)}>
+          <div className="rb-card" style={{ maxWidth: 520, width: "100%", maxHeight: "86vh", overflowY: "auto", padding: 20 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>@{sel.handle} {sel.is_admin && <span style={{ color: "var(--gold)", fontSize: 11 }}>ADMIN</span>}</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{sel.email || "—"} · joined {fmtD(sel.joined)}</div>
+              </div>
+              <button className={"rb-btn" + (sel.plan === "pro" ? "" : " ghost")} style={{ marginLeft: "auto", flex: "none", padding: "8px 14px", fontSize: 12 }}
+                onClick={() => setPlan(sel, sel.plan === "pro" ? "free" : "pro")}>
+                {sel.plan === "pro" ? "PRO ✓" : "Grant Pro"}
+              </button>
+            </div>
+
+            {!detail && <div className="rb-empty" style={{ padding: 26 }}>Loading detail…</div>}
+            {detail && (<>
+              <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 12, textAlign: "center", marginTop: 14, background: "var(--bg-2)" }}>
+                <div className="rb-stat"><div className="v">{(detail.tanks || []).length}</div><div className="k">Tanks</div></div>
+                <div className="rb-stat"><div className="v">{detail.livestock || 0}</div><div className="k">Livestock</div></div>
+                <div className="rb-stat"><div className="v">{detail.readings || 0}</div><div className="k">Readings</div></div>
+                <div className="rb-stat"><div className="v">{detail.posts_count || 0}</div><div className="k">Posts</div></div>
+                <div className="rb-stat"><div className="v">{detail.listings || 0}</div><div className="k">Listings</div></div>
+              </div>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 10 }}>
+                Usage: {sel.reefid_used || 0} ReefIDs · {sel.deepdive_used || 0} AI msgs · {sel.pearls || 0} pearls<br />
+                Last reading: {fmtD(detail.last_reading)} · Last post: {fmtD(detail.last_post)}
+              </div>
+              {(detail.tanks || []).length > 0 && (<>
+                <div style={{ fontWeight: 700, fontSize: 13.5, margin: "14px 0 6px" }}>Tanks</div>
+                {(detail.tanks || []).map((t, i) => (
+                  <div key={i} style={{ fontSize: 12.5, color: "var(--muted)", padding: "3px 0" }}>• {t.name} — {t.model || "?"} · {t.gal || "?"} gal</div>
+                ))}
+              </>)}
+              {(detail.recent_posts || []).length > 0 && (<>
+                <div style={{ fontWeight: 700, fontSize: 13.5, margin: "14px 0 6px" }}>Recent posts <span style={{ fontWeight: 400, color: "var(--muted-2)", fontSize: 11 }}>(tap ✕ to moderate)</span></div>
+                {(detail.recent_posts || []).map((p) => (
+                  <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid var(--brd)" }}>
+                    <div style={{ flex: 1, fontSize: 12.5, color: "var(--muted)" }}><b style={{ color: "var(--text)" }}>{p.tag}</b> — {p.body}</div>
+                    <span style={{ color: "var(--bad)", cursor: "pointer", fontWeight: 700, flex: "none" }} onClick={() => deletePost(p.id)}>✕</span>
+                  </div>
+                ))}
+              </>)}
+            </>)}
+            <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted-2)", marginTop: 16, cursor: "pointer" }} onClick={() => setSel(null)}>Close</div>
+          </div>
+        </div>, document.body)}
     </div>
   );
 }
