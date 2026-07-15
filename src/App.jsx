@@ -640,11 +640,8 @@ async function askReefAI(messages, system, kind) {
 function CoralAvatar({ size = 56 }) {
   return (
     <div className="rb-av ring" style={{ width: size, height: size }}>
-      <svg width={size * 0.62} height={size * 0.62} viewBox="0 0 48 48">
-        <path d="M14 44c-1-8 1-13-2-18-2-3 0-7 3-6 1-5 5-6 6-1 2-4 6-3 5 1 3-1 5 2 3 5-2 4-1 9-2 19z" fill="#b06cff"/>
-        <path d="M30 44c0-7-1-11 2-15 2-3 6-2 5 2 2-2 5 0 4 3-1 2 0 6-1 10z" fill="#3ce0a3"/>
-        <path d="M22 44c0-5 0-9-1-12 2-1 4 1 3 4 1 0 2 2 1 4z" fill="#3fe3ff"/>
-      </svg>
+      <img src="/icons/icon-512.png" alt="Tidepool Reef" width={size} height={size}
+        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
     </div>
   );
 }
