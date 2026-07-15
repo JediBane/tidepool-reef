@@ -661,13 +661,29 @@ function ReefLogo() {
 }
 
 /* ---------------- Auth ---------------- */
+function FeatureRow({ icon, title, body, c }) {
+  return (
+    <div style={{ display: "flex", gap: 13, alignItems: "flex-start", padding: "13px 0" }}>
+      <div style={{ flex: "none", width: 42, height: 42, borderRadius: 12, display: "grid", placeItems: "center",
+        background: `linear-gradient(140deg, ${c}22, ${c}0a)`, border: `1px solid ${c}44` }}>{icon}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 700, fontSize: 15 }}>{title}</div>
+        <div style={{ color: "var(--muted)", fontSize: 13, lineHeight: 1.5, marginTop: 2 }}>{body}</div>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen() {
-  const [mode, setMode] = useState("signin"); // signin | signup
+  const [mode, setMode] = useState("signup"); // land on signup — this is a new-visitor funnel
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [handle, setHandle] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const authRef = useRef(null);
+
+  const scrollToAuth = () => { if (authRef.current) authRef.current.scrollIntoView({ behavior: "smooth", block: "center" }); };
 
   const submit = async () => {
     setBusy(true); setMsg("");
@@ -688,38 +704,100 @@ function AuthScreen() {
 
   return (
     <div className="rb-root"><style>{STYLES}</style>
-      <div className="rb-shell" style={{ paddingTop: 70 }}>
-        <div className="rb-authwrap">
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}><CoralAvatar size={84} /></div>
-        <ReefLogo />
-        <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 13.5, margin: "10px 0 24px" }}>
-          Track your reef. Trade frags. Talk coral.
-        </div>
-        <div className="rb-card" style={{ padding: 18 }}>
-          <div className="rb-tabs" style={{ margin: "0 0 14px" }}>
-            <div className={"rb-chip" + (mode === "signin" ? " on" : "")} onClick={() => setMode("signin")}>Sign in</div>
-            <div className={"rb-chip" + (mode === "signup" ? " on" : "")} onClick={() => setMode("signup")}>Create account</div>
-          </div>
-          {mode === "signup" && (
-            <div className="rb-field"><label>Handle</label>
-              <input className="rb-input" placeholder="e.g. JediReef" value={handle} onChange={(e) => setHandle(e.target.value)} autoCapitalize="none" />
+      <div className="rb-shell" style={{ paddingTop: 48, paddingBottom: 60 }}>
+        <div style={{ maxWidth: 460, margin: "0 auto" }}>
+
+          {/* HERO */}
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><CoralAvatar size={88} /></div>
+            <ReefLogo />
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 27, lineHeight: 1.15, letterSpacing: "-.5px", marginTop: 18 }}>
+              The home for your<br /><span style={{ background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>reef aquarium</span>
             </div>
-          )}
-          <div className="rb-field"><label>Email</label>
-            <input className="rb-input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" />
+            <div style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.6, margin: "14px auto 0", maxWidth: 380 }}>
+              Track your parameters, get AI diagnosis when something looks off, ID any coral from a photo, and trade frags with reefers near you — all in one app.
+            </div>
+            <button className="rb-btn" style={{ width: "100%", maxWidth: 300, margin: "22px auto 0", padding: 15, fontSize: 15 }} onClick={scrollToAuth}>
+              <Sparkles size={17} /> Create your free account
+            </button>
+            <div style={{ fontSize: 12.5, color: "var(--muted-2)", marginTop: 10 }}>Free to start · No credit card</div>
           </div>
-          <div className="rb-field"><label>Password</label>
-            <input className="rb-input" type="password" placeholder="••••••••" value={pw} onChange={(e) => setPw(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && email && pw && !busy) submit(); }} />
+
+          {/* FEATURE SHOWCASE */}
+          <div className="rb-card" style={{ padding: "8px 18px", marginTop: 30 }}>
+            <FeatureRow c="#b06cff" icon={<Bot size={20} color="#c79bff" />}
+              title="DeepDive AI advisor"
+              body="Ask anything about your tank. DeepDive reads your live parameters and livestock, then gives specific, practical fixes — snap a photo and it diagnoses what it sees." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#3fe3ff" icon={<Camera size={20} color="#3fe3ff" />}
+              title="Reef ID from a photo"
+              body="Point your camera at any coral, fish, or invert. Get the species, care difficulty, and how to keep it thriving — then add it to your tank in a tap." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#2ee6c8" icon={<TrendingUp size={20} color="#2ee6c8" />}
+              title="Parameter tracking & health score"
+              body="Log alk, calcium, nitrate and more. See trends over time, get a weighted tank health score, and catch problems before they cost you corals." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#ffc24d" icon={<BookOpen size={20} color="#ffc24d" />}
+              title="Reefpedia — 190+ species & zoa morphs"
+              body="A built-in library of fish, corals, inverts, pests, and named zoanthid morphs, with real photos and care basics for each." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#ff7a9e" icon={<Store size={20} color="#ff7a9e" />}
+              title="Frag marketplace"
+              body="Buy and sell frags, fish, and gear with reefers near you. Message sellers directly and build your reputation." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#3ce0a3" icon={<Users size={20} color="#3ce0a3" />}
+              title="A real reef community"
+              body="Share tank updates and photos, ask for help, follow other reefers, and see who keeps the corals you're eyeing." />
           </div>
-          {msg && <div style={{ color: "var(--warn)", fontSize: 13, marginBottom: 10, lineHeight: 1.4 }}>{msg}</div>}
-          <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!email || !pw || busy} onClick={submit}>
-            {busy ? "One sec…" : mode === "signup" ? "Create account" : "Sign in"}
-          </button>
-        </div>
-        <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 16 }}>
-          Your data syncs across devices. Marketplace listings and posts are visible to other reefers.
-        </div>
+
+          {/* VALUE STRIP */}
+          <div style={{ display: "flex", gap: 10, marginTop: 16, textAlign: "center" }}>
+            {[["190+", "species & morphs"], ["8", "parameters tracked"], ["AI", "tank diagnosis"]].map(([v, k], i) => (
+              <div key={i} className="rb-card" style={{ flex: 1, padding: "14px 6px" }}>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20, background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>{v}</div>
+                <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, lineHeight: 1.3 }}>{k}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* AUTH CARD */}
+          <div ref={authRef} className="rb-card" style={{ padding: 18, marginTop: 30, border: "1px solid rgba(63,227,255,.25)" }}>
+            <div style={{ textAlign: "center", fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 18, marginBottom: 4 }}>
+              {mode === "signup" ? "Start tracking your reef" : "Welcome back"}
+            </div>
+            <div style={{ textAlign: "center", color: "var(--muted)", fontSize: 12.5, marginBottom: 14 }}>
+              {mode === "signup" ? "Free account — set up your first tank in under a minute." : "Sign in to your tanks."}
+            </div>
+            <div className="rb-tabs" style={{ margin: "0 0 14px" }}>
+              <div className={"rb-chip" + (mode === "signup" ? " on" : "")} onClick={() => setMode("signup")}>Create account</div>
+              <div className={"rb-chip" + (mode === "signin" ? " on" : "")} onClick={() => setMode("signin")}>Sign in</div>
+            </div>
+            {mode === "signup" && (
+              <div className="rb-field"><label>Handle</label>
+                <input className="rb-input" placeholder="e.g. JediReef" value={handle} onChange={(e) => setHandle(e.target.value)} autoCapitalize="none" />
+              </div>
+            )}
+            <div className="rb-field"><label>Email</label>
+              <input className="rb-input" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoCapitalize="none" />
+            </div>
+            <div className="rb-field"><label>Password</label>
+              <input className="rb-input" type="password" placeholder="••••••••" value={pw} onChange={(e) => setPw(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && email && pw && !busy) submit(); }} />
+            </div>
+            {msg && <div style={{ color: "var(--warn)", fontSize: 13, marginBottom: 10, lineHeight: 1.4 }}>{msg}</div>}
+            <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!email || !pw || busy} onClick={submit}>
+              {busy ? "One sec…" : mode === "signup" ? "Create my free account" : "Sign in"}
+            </button>
+            {mode === "signup" && (
+              <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
+                Already have an account? <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setMode("signin")}>Sign in</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 11.5, marginTop: 16, lineHeight: 1.5 }}>
+            Your data syncs across devices. Marketplace listings and posts are visible to other reefers.
+          </div>
         </div>
       </div>
     </div>
