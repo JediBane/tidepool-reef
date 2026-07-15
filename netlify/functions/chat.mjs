@@ -10,6 +10,28 @@
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "https://dhluuqpdbshvhnskyprb.supabase.co").trim();
 const SUPABASE_ANON = (process.env.SUPABASE_PUBLISHABLE_KEY || "").trim();
+const SUPABASE_SERVICE = (process.env.SUPABASE_SERVICE_KEY || "").trim();
+
+// Authoritative usage gate — runs in the DB, cannot be bypassed by the client.
+async function consumeGate(uid, kind) {
+  if (!SUPABASE_SERVICE) return { allowed: true, skipped: true }; // not configured → fail open (logged)
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/rpc/ai_gate_consume`, {
+      method: "POST",
+      headers: {
+        apikey: SUPABASE_SERVICE,
+        Authorization: `Bearer ${SUPABASE_SERVICE}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ target: uid, kind }),
+    });
+    if (!r.ok) { console.error("ai_gate_consume http", r.status, await r.text()); return { allowed: true, skipped: true }; }
+    return await r.json();
+  } catch (e) {
+    console.error("ai_gate_consume failed:", String(e));
+    return { allowed: true, skipped: true }; // don't hard-fail paying users on a gate hiccup
+  }
+}
 
 // Validate the caller's Supabase access token. Returns the user object or null.
 async function getUser(authHeader) {
@@ -62,6 +84,16 @@ export default async (req) => {
     return Response.json({ error: { message: "Bad request." } }, { status: 400 });
   }
   const maxTokens = Math.min(Math.max(Number(body.max_tokens) || 1000, 1), 1500);
+
+  // --- Authoritative free-limit enforcement (server-side; client cannot bypass). ---
+  const kind = body.kind === "reefid" ? "reefid" : "deepdive";
+  const gate = await consumeGate(user.id, kind);
+  if (!gate.allowed) {
+    return Response.json(
+      { error: { message: "You've used all your free AI previews. Upgrade to Tidepool Pro for unlimited access.", code: "limit_reached" } },
+      { status: 402 }
+    );
+  }
 
   const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
   const payload = {

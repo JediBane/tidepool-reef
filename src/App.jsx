@@ -551,7 +551,7 @@ async function fetchAll(uid) {
 /* ---------------- Pro gating ---------------- */
 const FREE_REEFID = 3;      // lifetime free ReefID scans
 const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
-const AI_GATE = { check: null };   // main component installs the checker
+const AI_GATE = { check: null, sync: null };   // main component installs the checker + counter sync
 
 /* Returns true if the call may proceed. Opens the upgrade sheet + returns false otherwise. */
 async function gateAI(kind) {
@@ -580,16 +580,21 @@ function readReefPhoto(f, cb) {
   im.src = url;
 }
 
-async function askReefAI(messages, system) {
+async function askReefAI(messages, system, kind) {
   let token = null;
   try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
-    body: JSON.stringify({ max_tokens: 1000, system, messages }),
+    body: JSON.stringify({ max_tokens: 1000, system, messages, kind: kind || "deepdive" }),
   });
   const data = await res.json();
-  if (data && data.error) throw new Error(data.error.message || "AI request failed");
+  if (data && data.error) {
+    const err = new Error(data.error.message || "AI request failed");
+    if (data.error.code === "limit_reached") err.limitReached = true;
+    throw err;
+  }
+  if (AI_GATE.sync) AI_GATE.sync();   // refresh cached usage counters (non-blocking)
   return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 }
 
@@ -942,6 +947,8 @@ function TidepoolReef() {
     tick();
   }, [session && session.user && session.user.id]);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  // Client-side check is for UX ONLY (show the paywall early). The Netlify function
+  // enforces the real limit server-side and increments the counter — this never can.
   AI_GATE.check = async (kind) => {
     const p = state && state.profile;
     if (!p) return false;
@@ -949,10 +956,12 @@ function TidepoolReef() {
     const used = kind === "reefid" ? (p.reefid_used || 0) : (p.deepdive_used || 0);
     const limit = kind === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
     if (used >= limit) { setUpgradeOpen(true); return false; }
-    const { data: n, error } = await supabase.rpc("use_ai", { kind });
-    if (error) { console.error("use_ai failed:", error.message); return true; } // fail-open, log it
-    setState((s) => s ? { ...s, profile: { ...s.profile, [kind === "reefid" ? "reefid_used" : "deepdive_used"]: n } } : s);
     return true;
+  };
+  AI_GATE.sync = async () => {
+    if (!session || !session.user) return;
+    const { data } = await supabase.from("profiles").select("reefid_used, deepdive_used, plan").eq("id", session.user.id).single();
+    if (data) setState((s) => s ? { ...s, profile: { ...s.profile, ...data } } : s);
   };
   useEffect(() => {
     const el = document.getElementById("rb-ptr");
@@ -2268,7 +2277,7 @@ function ZoaSheet({ z, onClose, onAddToTank }) {
     try {
       const r = await askReefAI(
         [{ role: "user", content: `I want to keep the zoanthid morph "${z.name}" in my reef tank. Give me 4 short, practical tips for getting it to color up and spread. One line each.` }],
-        "You are Tidepool Reef DeepDive, an expert reef advisor. Be concise and specific.");
+        "You are Tidepool Reef DeepDive, an expert reef advisor. Be concise and specific.", "deepdive");
       setTips(r || "Couldn't load tips right now.");
     } catch (e) { setTips("DeepDive error: " + (e.message || "connection failed")); }
     setBusy(false);
@@ -2513,7 +2522,7 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
         ? `I think I have ${item.name} (${item.sci}) in my reef tank. Give me a short, practical eradication plan — 3-4 steps, most effective first, plus one thing NOT to do.`
         : `Give 4 concise, practical care tips for keeping ${item.name} (${item.sci}) in a home reef aquarium. Bullet points, one line each.`;
       const r = await askReefAI([{ role: "user", content: prompt }],
-        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Be concise, specific, and practical.");
+        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Be concise, specific, and practical.", "deepdive");
       setTips(r || "Couldn't load tips right now.");
     } catch (e) { setTips("DeepDive error: " + (e.message || "connection failed")); }
     setBusy(false);
@@ -2962,7 +2971,7 @@ function AIScheduleSheet({ state, latest, onClose, onAdd }) {
       `The "every" field must be exactly one of: ${EVERY_OPTS.join(", ")}.`;
     try {
       const raw = await askReefAI([{ role: "user", content: prompt }],
-        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Reply with valid JSON only — no markdown fences, no commentary.");
+        "You are Tidepool Reef DeepDive, an expert reef-aquarium advisor. Reply with valid JSON only — no markdown fences, no commentary.", "deepdive");
       const clean = raw.replace(/```json|```/g, "").trim();
       const jsonStart = clean.indexOf("[");
       const parsed = JSON.parse(clean.slice(jsonStart, clean.lastIndexOf("]") + 1));
@@ -3083,7 +3092,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock, hideLivestock, live
       `In 2-3 short sentences: is it stable or drifting, in or out of range, and one specific suggestion if needed. Be direct.`;
     try {
       const r = await askReefAI([{ role: "user", content: prompt }],
-        "You are Tidepool Reef DeepDive, a concise expert reef-aquarium advisor. 2-3 sentences max, specific and practical.");
+        "You are Tidepool Reef DeepDive, a concise expert reef-aquarium advisor. 2-3 sentences max, specific and practical.", "deepdive");
       setAiSummary(r || "Couldn't generate a summary right now.");
     } catch (e) { setAiSummary("DeepDive error: " + (e.message || "connection failed")); }
     setAiBusy(false);
@@ -3308,10 +3317,14 @@ function ReefID({ profile, onUpgrade }) {
     if (!(await gateAI("reefid"))) return;
     if (!img) return; setBusy(true); setResult("");
     try {
+      let token = null;
+      try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
       const res = await fetch("/api/chat", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
         body: JSON.stringify({
           max_tokens: 1000,
+          kind: "reefid",
           system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species. Reply with: Common name, Scientific name (best guess), Type, Care difficulty, and 2 quick care tips. If you can't tell, say so and list possibilities. Keep it concise.",
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: img.media, data: img.b64 } },
@@ -3320,7 +3333,10 @@ function ReefID({ profile, onUpgrade }) {
         }),
       });
       const data = await res.json();
-      if (data && data.error) throw new Error(data.error.message || "AI request failed");
+      if (data && data.error) {
+        if (data.error.code === "limit_reached" && onUpgrade) onUpgrade();
+        throw new Error(data.error.message || "AI request failed");
+      }
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
       setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
@@ -3396,9 +3412,11 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
         return { role: m.role, content: c };
       }).reverse();
       if (!(await gateAI("deepdive"))) { setBusy(false); return; }
-      const reply = await askReefAI(apiMsgs, SYS);
+      const reply = await askReefAI(apiMsgs, SYS, "deepdive");
       setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
-    } catch (e) { setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
+    } catch (e) {
+      if (e.limitReached && onUpgrade) { setMsgs((m) => m.slice(0, -1)); onUpgrade(); setBusy(false); return; }
+      setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
     setBusy(false);
   }
   const diagnose = () => {
