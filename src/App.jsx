@@ -42,7 +42,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) forwards;}
 @keyframes rbUp{from{opacity:0;transform:translateY(14px)}99%{transform:translateY(0)}to{opacity:1;transform:none}}
 
-.rb-top{display:flex;align-items:center;gap:12px;padding:18px 2px 14px;position:sticky;top:0;z-index:30;}
+.rb-top{display:flex;align-items:center;gap:12px;padding:calc(18px + env(safe-area-inset-top,0px)) 2px 14px;position:sticky;top:0;z-index:30;}
 .rb-iconbtn{width:42px;height:42px;border-radius:14px;border:1px solid var(--brd);background:var(--glass);
   display:grid;place-items:center;color:var(--text);cursor:pointer;position:relative;backdrop-filter:blur(12px);flex:none;}
 .rb-title{font-family:'Bricolage Grotesque';font-weight:800;font-size:19px;letter-spacing:-.4px;}
@@ -208,7 +208,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:rgba(2,10,16,.7);backdrop-filter:blur(4px);
   display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;overflow-y:auto;overscroll-behavior:contain;}
 .rb-sheet{width:min(480px,100%);max-height:88vh;overflow-y:auto;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
-  border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px;animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
+  border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
 @keyframes rbSheet{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
 .rb-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .rb-sheet-h b{font-family:'Bricolage Grotesque';font-size:19px;}
@@ -1202,7 +1202,7 @@ function TidepoolReef() {
 
       {/* pull-to-refresh indicator */}
       <div id="rb-ptr" style={{
-        position: "fixed", top: 8, left: "50%", zIndex: 200,
+        position: "fixed", top: "calc(8px + env(safe-area-inset-top, 0px))", left: "50%", zIndex: 200,
         transform: "translateX(-50%) translateY(-46px)", opacity: 0,
         width: 38, height: 38, borderRadius: "50%", background: "var(--bg-2)",
         border: "1px solid var(--brd-2)", display: "grid", placeItems: "center",
@@ -2822,6 +2822,17 @@ function Shop({ allListings, cat, setCat }) {
       <div className="rb-tabs" style={{ marginTop: 6 }}>
         {cats.map((c) => <div key={c} className={"rb-chip" + (cat === c ? " on" : "")} onClick={() => setCat(c)}>{c}</div>)}
       </div>
+      {shown.length === 0 ? (
+        <div className="rb-card rb-empty" style={{ padding: "36px 22px", marginTop: 4 }}>
+          <Store size={28} color="var(--aqua)" style={{ opacity: .8 }} />
+          <div style={{ marginTop: 10, fontWeight: 600, color: "var(--text)" }}>
+            {cat === "All" ? "No listings yet" : `No ${cat.toLowerCase()} listings`}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            {cat === "All" ? "Frags, fish, and gear from the community will show up here. List something from your Profile → Seller Hub." : "Try another category, or check back soon."}
+          </div>
+        </div>
+      ) : (
       <div className="rb-mgrid">
         {shown.map((l) => (
           <div key={l.id} className="rb-card rb-mcard">
@@ -2836,6 +2847,7 @@ function Shop({ allListings, cat, setCat }) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
