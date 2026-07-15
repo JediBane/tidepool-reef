@@ -50,6 +50,12 @@ async function getUser(authHeader) {
 }
 
 export default async (req) => {
+  // Lightweight status probe: tells the client whether the server-side gate is active
+  // (SUPABASE_SERVICE_KEY present). Lets the client decide whether IT should count, with
+  // no double-counting on the first call. No auth needed — reveals no secrets.
+  if (req.method === "GET") {
+    return Response.json({ gateActive: !!SUPABASE_SERVICE });
+  }
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -94,6 +100,7 @@ export default async (req) => {
       { status: 402 }
     );
   }
+  const serverCounted = !!(gate && gate.counted && !gate.skipped);
 
   const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6";
   const payload = {
@@ -114,6 +121,7 @@ export default async (req) => {
       body: JSON.stringify(payload),
     });
     const data = await r.json();
+    if (data && typeof data === "object" && !Array.isArray(data)) data._serverCounted = serverCounted;
     return Response.json(data, { status: r.status });
   } catch (err) {
     return Response.json({ error: { message: "Upstream request failed: " + String(err) } }, { status: 502 });

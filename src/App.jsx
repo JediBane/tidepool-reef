@@ -565,6 +565,9 @@ async function fetchAll(uid) {
 const FREE_REEFID = 3;      // lifetime free ReefID scans
 const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
 const AI_GATE = { check: null, sync: null };   // main component installs the checker + counter sync
+// Once we learn the server-side gate is active (env key set, it counts), the client stops
+// incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
+const AI_GATE_STATE = { serverCounts: false };
 
 /* Returns true if the call may proceed. Opens the upgrade sheet + returns false otherwise. */
 async function gateAI(kind) {
@@ -631,6 +634,7 @@ async function askReefAI(messages, system, kind) {
     if (data.error.code === "limit_reached") err.limitReached = true;
     throw err;
   }
+  if (data && data._serverCounted) AI_GATE_STATE.serverCounts = true;
   if (AI_GATE.sync) AI_GATE.sync();   // refresh cached usage counters (non-blocking)
   return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
 }
@@ -1024,6 +1028,10 @@ function TidepoolReef() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    // Learn up-front whether the server gate counts, so the client never double-counts.
+    fetch("/api/chat", { method: "GET" }).then((r) => r.json()).then((d) => {
+      if (d && d.gateActive) AI_GATE_STATE.serverCounts = true;
+    }).catch(() => {});
     return () => sub.subscription.unsubscribe();
   }, []);
   useEffect(() => {
@@ -1068,6 +1076,18 @@ function TidepoolReef() {
     const used = kind === "reefid" ? (p.reefid_used || 0) : (p.deepdive_used || 0);
     const limit = kind === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
     if (used >= limit) { setUpgradeOpen(true); return false; }
+    // Count this use client-side ONLY while the server gate isn't the active counter
+    // (i.e. before SUPABASE_SERVICE_KEY is set). Once the server counts, we defer to it
+    // and skip here to avoid double-counting. use_ai is a security-definer RPC scoped to
+    // auth.uid(), so a user can only ever bump their own counter.
+    if (!AI_GATE_STATE.serverCounts) {
+      const { data: n, error } = await supabase.rpc("use_ai", { kind });
+      if (!error && typeof n === "number") {
+        setState((s) => s ? { ...s, profile: { ...s.profile, [kind === "reefid" ? "reefid_used" : "deepdive_used"]: n } } : s);
+      } else if (error) {
+        console.error("use_ai increment failed:", error.message);
+      }
+    }
     return true;
   };
   AI_GATE.sync = async () => {
@@ -3708,8 +3728,9 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
   };
 
   const identify = async () => {
+    if (!img) return;
     if (!(await gateAI("reefid"))) return;
-    if (!img) return; setBusy(true); setResult("");
+    setBusy(true); setResult("");
     try {
       const token = await getAccessToken();
       const res = await fetch("/api/chat", {
@@ -3730,6 +3751,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
         if (data.error.code === "limit_reached" && onUpgrade) { onUpgrade(); setBusy(false); return; }
         throw new Error((data.error.message || "AI request failed") + (res.status === 401 ? " (auth)" : ""));
       }
+      if (data && data._serverCounted) AI_GATE_STATE.serverCounts = true;
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
       setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
