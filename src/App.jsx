@@ -705,7 +705,7 @@ function usePullToRefresh(onRefresh, refreshing, ready) {
       el.style.opacity = String(Math.min(1, px / THRESHOLD));
       const svg = el.querySelector("svg"); if (svg) svg.style.transform = `rotate(${px * 3}deg)`;
     };
-    const reset = () => { const el = indicator(); if (el && !busy.current) { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; } };
+    const reset = () => { const el = indicator(); if (el) { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; } };
 
     const onStart = (e) => {
       pulling = scroller.scrollTop <= 0 && !busy.current;
@@ -775,6 +775,12 @@ function TidepoolReef() {
     setRefreshing(false);
   };
   usePullToRefresh(refresh, refreshing, !!state);
+  useEffect(() => {
+    const el = document.getElementById("rb-ptr");
+    if (!el) return;
+    if (refreshing) { el.style.transform = "translateX(-50%) translateY(8px)"; el.style.opacity = "1"; }
+    else { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; }
+  }, [refreshing, state]);
 
   const latest = useMemo(() => (state && state.history.length ? state.history[state.history.length - 1] : null), [state]);
   const award = async (n) => {
@@ -942,8 +948,8 @@ function TidepoolReef() {
         width: 38, height: 38, borderRadius: "50%", background: "var(--bg-2)",
         border: "1px solid var(--brd-2)", display: "grid", placeItems: "center",
         boxShadow: "0 6px 20px -6px rgba(0,0,0,.6)", pointerEvents: "none",
-        transition: refreshing ? "none" : "transform .25s, opacity .25s",
-      }} ref={(el) => { if (el && refreshing) { el.style.transform = "translateX(-50%) translateY(8px)"; el.style.opacity = "1"; } }}>
+        transition: "transform .25s, opacity .25s",
+      }}>
         <RefreshCw size={18} color="var(--aqua)" className={refreshing ? "rb-spin" : ""} />
       </div>
 
