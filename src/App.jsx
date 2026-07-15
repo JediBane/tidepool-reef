@@ -580,9 +580,22 @@ function readReefPhoto(f, cb) {
   im.src = url;
 }
 
+/* Reliably get the access token — retries if the session isn't hydrated yet
+   (Supabase can briefly return null right after page load). */
+async function getAccessToken() {
+  for (let i = 0; i < 3; i++) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      const t = data && data.session && data.session.access_token;
+      if (t) return t;
+    } catch (e) {}
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return null;
+}
+
 async function askReefAI(messages, system, kind) {
-  let token = null;
-  try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
+  const token = await getAccessToken();
   const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
@@ -3317,8 +3330,7 @@ function ReefID({ profile, onUpgrade }) {
     if (!(await gateAI("reefid"))) return;
     if (!img) return; setBusy(true); setResult("");
     try {
-      let token = null;
-      try { const { data } = await supabase.auth.getSession(); token = data.session && data.session.access_token; } catch (e) {}
+      const token = await getAccessToken();
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
@@ -3334,8 +3346,8 @@ function ReefID({ profile, onUpgrade }) {
       });
       const data = await res.json();
       if (data && data.error) {
-        if (data.error.code === "limit_reached" && onUpgrade) onUpgrade();
-        throw new Error(data.error.message || "AI request failed");
+        if (data.error.code === "limit_reached" && onUpgrade) { onUpgrade(); setBusy(false); return; }
+        throw new Error((data.error.message || "AI request failed") + (res.status === 401 ? " (auth)" : ""));
       }
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
       setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
