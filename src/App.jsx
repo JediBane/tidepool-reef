@@ -1285,7 +1285,7 @@ function UpgradeSheet({ open, onClose, profile }) {
 }
 
 /* ---------------- Admin ---------------- */
-function AdminPanel({ state }) {
+function AdminUsers({ state }) {
   const [users, setUsers] = useState(null);
   const [err, setErr] = useState("");
   const [q, setQ] = useState("");
@@ -1341,7 +1341,7 @@ function AdminPanel({ state }) {
   const fmtD = (d) => d ? new Date(d).toLocaleDateString() : "never";
 
   return (
-    <div className="rb-fadein">
+    <div>
       {/* stats */}
       <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 14, textAlign: "center", marginTop: 4, flexWrap: "wrap", gap: 8 }}>
         <div className="rb-stat"><div className="v">{users.length}</div><div className="k">Users</div></div>
@@ -1433,6 +1433,163 @@ function AdminPanel({ state }) {
             <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted-2)", marginTop: 16, cursor: "pointer" }} onClick={() => setSel(null)}>Close</div>
           </div>
         </div>, document.body)}
+    </div>
+  );
+}
+
+/* ---------------- Admin CRM ---------------- */
+function AdminOverview() {
+  const [stats, setStats] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    supabase.rpc("admin_platform_stats").then(({ data, error }) => {
+      if (error) setErr(error.message); else setStats(data);
+    });
+  }, []);
+  if (err) return <div className="rb-card rb-empty" style={{ padding: 26 }}>Error: {err}</div>;
+  if (!stats) return <div className="rb-empty" style={{ padding: 36 }}>Loading platform stats…</div>;
+  const t = stats.totals || {};
+  const weeks = stats.weeks || [];
+  const kpis = [
+    ["Users", t.users, "🧑‍🤝‍🧑"], ["Pro subs", t.pro, "⭐"], ["Est. MRR", "$" + (t.pro * 6.99).toFixed(0), "💵"],
+    ["Tanks", t.tanks, "🪣"], ["Readings", t.readings, "🧪"], ["Posts", t.posts, "💬"],
+    ["Comments", t.comments, "↩️"], ["Listings", t.listings, "🏪"], ["ReefIDs", t.reefids, "📸"], ["AI msgs", t.aimsgs, "🤖"],
+  ];
+  const chart = (key, color, label) => (
+    <div className="rb-card rb-chartwrap" style={{ marginTop: 12 }}>
+      <div className="rb-chart-h"><b>{label}</b><span style={{ fontSize: 11, color: "var(--muted)" }}>last 10 weeks</span></div>
+      <ResponsiveContainer width="100%" height={150}>
+        <LineChart data={weeks} margin={{ top: 8, right: 14, left: -14, bottom: 4 }}>
+          <CartesianGrid stroke="rgba(255,255,255,.05)" vertical={false} />
+          <XAxis dataKey="wk" stroke="var(--muted-2)" fontSize={10} tickLine={false} axisLine={false} minTickGap={22} />
+          <YAxis stroke="var(--muted-2)" fontSize={10} tickLine={false} axisLine={false} width={34} allowDecimals={false} />
+          <Tooltip content={({ active, payload }) => active && payload && payload.length ? (
+            <div style={{ background: "var(--bg-2)", border: "1px solid var(--brd-2)", borderRadius: 10, padding: "6px 10px", fontSize: 12 }}>
+              <div style={{ color: "var(--muted)" }}>{payload[0].payload.wk}</div>
+              <div style={{ fontWeight: 700, color }}>{payload[0].value}</div>
+            </div>) : null} />
+          <Line type="monotone" dataKey={key} stroke={color} strokeWidth={2.5} dot={{ r: 2.5, fill: color }} />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 8, marginTop: 4 }}>
+        {kpis.map(([k, v, ic]) => (
+          <div key={k} className="rb-card" style={{ padding: "10px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 16 }}>{ic}</div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 17, marginTop: 2 }}>{v ?? 0}</div>
+            <div style={{ fontSize: 10, color: "var(--muted)" }}>{k}</div>
+          </div>
+        ))}
+      </div>
+      {chart("signups", "var(--aqua)", "New signups")}
+      {chart("readings", "var(--teal)", "Parameter readings logged")}
+      {chart("posts", "var(--violet)", "Community posts")}
+    </div>
+  );
+}
+
+function AdminContent() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const load = () => supabase.rpc("admin_recent_content").then(({ data: d, error }) => {
+    if (error) setErr(error.message); else setData(d);
+  });
+  useEffect(() => { load(); }, []);
+  const delPost = async (id) => {
+    if (!confirm("Delete this post?")) return;
+    const { error } = await supabase.rpc("admin_delete_post", { pid: id });
+    if (error) return alert(error.message);
+    setData((d) => ({ ...d, posts: d.posts.filter((p) => p.id !== id) }));
+  };
+  const delComment = async (id) => {
+    if (!confirm("Delete this comment?")) return;
+    const { error } = await supabase.rpc("admin_delete_comment", { cid: id });
+    if (error) return alert(error.message);
+    setData((d) => ({ ...d, comments: d.comments.filter((c) => c.id !== id) }));
+  };
+  if (err) return <div className="rb-card rb-empty" style={{ padding: 26 }}>Error: {err}</div>;
+  if (!data) return <div className="rb-empty" style={{ padding: 36 }}>Loading content…</div>;
+  const row = (item, body, onDel) => (
+    <div key={item.id} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "9px 0", borderTop: "1px solid var(--brd)" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5 }}><b>@{item.handle}</b> <span style={{ color: "var(--muted-2)", fontSize: 10.5 }}>{new Date(item.created_at).toLocaleString()}</span></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 2 }}>{body}</div>
+      </div>
+      <span style={{ color: "var(--bad)", cursor: "pointer", fontWeight: 700, flex: "none" }} onClick={onDel}>✕</span>
+    </div>
+  );
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>💬 Recent posts <small>{data.posts.length}</small></div>
+      <div className="rb-card" style={{ padding: "4px 14px 10px" }}>
+        {data.posts.length === 0 && <div className="rb-empty" style={{ padding: 20 }}>No posts yet.</div>}
+        {data.posts.map((p) => row(p, <><b style={{ color: "var(--text)" }}>{p.tag}</b> — {p.body}</>, () => delPost(p.id)))}
+      </div>
+      <div className="rb-h2">↩️ Recent comments <small>{data.comments.length}</small></div>
+      <div className="rb-card" style={{ padding: "4px 14px 10px" }}>
+        {data.comments.length === 0 && <div className="rb-empty" style={{ padding: 20 }}>No comments yet.</div>}
+        {data.comments.map((c) => row(c, c.body, () => delComment(c.id)))}
+      </div>
+    </div>
+  );
+}
+
+function AdminMarket() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    supabase.rpc("admin_listings").then(({ data, error }) => {
+      if (error) setErr(error.message); else setRows(data || []);
+    });
+  }, []);
+  const setStatus = async (l, status) => {
+    const { error } = await supabase.rpc("admin_set_listing_status", { lid: l.id, new_status: status });
+    if (error) return alert(error.message);
+    setRows((r) => r.map((x) => x.id === l.id ? { ...x, status } : x));
+  };
+  if (err) return <div className="rb-card rb-empty" style={{ padding: 26 }}>Error: {err}</div>;
+  if (!rows) return <div className="rb-empty" style={{ padding: 36 }}>Loading listings…</div>;
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>🏪 Listings <small>{rows.length}</small></div>
+      <div className="rb-card">
+        {rows.length === 0 && <div className="rb-empty" style={{ padding: 22 }}>No listings.</div>}
+        {rows.map((l) => (
+          <div key={l.id} className="rb-li" style={{ alignItems: "center" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</div>
+              <div className="sub">@{l.handle} · {l.category} · ${l.price_usd}</div>
+            </div>
+            <span className="rb-badge" style={{ flex: "none", fontSize: 10.5,
+              background: l.status === "active" ? "rgba(46,230,200,.15)" : "rgba(255,93,114,.12)",
+              color: l.status === "active" ? "var(--teal)" : "var(--bad)",
+              border: `1px solid ${l.status === "active" ? "rgba(46,230,200,.4)" : "rgba(255,93,114,.35)"}` }}>{l.status}</span>
+            {l.status === "active"
+              ? <button className="rb-btn ghost" style={{ flex: "none", padding: "6px 11px", fontSize: 11.5 }} onClick={() => setStatus(l, "removed")}>Remove</button>
+              : <button className="rb-btn ghost" style={{ flex: "none", padding: "6px 11px", fontSize: 11.5 }} onClick={() => setStatus(l, "active")}>Restore</button>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminPanel({ state }) {
+  const [tab, setTab] = useState("overview");
+  return (
+    <div className="rb-fadein">
+      <div className="rb-tabs" style={{ marginTop: 4, flexWrap: "wrap" }}>
+        {[["overview", "Overview"], ["users", "Users"], ["content", "Content"], ["market", "Market"]].map(([k, l]) => (
+          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</div>
+        ))}
+      </div>
+      {tab === "overview" && <AdminOverview />}
+      {tab === "users" && <AdminUsers state={state} />}
+      {tab === "content" && <AdminContent />}
+      {tab === "market" && <AdminMarket />}
     </div>
   );
 }
