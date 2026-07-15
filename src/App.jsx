@@ -5,7 +5,7 @@ import {
 import {
   Menu, X, Bell, Waves, Droplets, Fish, Shell, Store, Newspaper, BookOpen, ListChecks,
   FlaskConical, Notebook, Camera, Bot, MessageCircle, Receipt, Settings, MapPin, Heart,
-  ChevronRight, ChevronLeft, Check, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
+  ChevronRight, ChevronLeft, Check, RefreshCw, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
   Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, Users, SlidersHorizontal,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
@@ -27,7 +27,7 @@ const STYLES = `
   --text:#e9f7fc;--muted:#84a8ba;--muted-2:#5b8194;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-.rb-root{font-family:'Hanken Grotesk',sans-serif;color:var(--text);min-height:100vh;position:relative;overflow-x:hidden;
+.rb-root{font-family:'Hanken Grotesk',sans-serif;color:var(--text);min-height:100vh;position:relative;overflow-x:hidden;overscroll-behavior-y:contain;
   background:radial-gradient(120% 80% at 50% -10%,rgba(63,227,255,.18),transparent 55%),
     radial-gradient(90% 60% at 90% 110%,rgba(176,108,255,.12),transparent 60%),
     radial-gradient(70% 50% at 0% 100%,rgba(255,122,92,.08),transparent 55%),
@@ -129,6 +129,8 @@ const STYLES = `
   color:var(--bg-0);transition:.18s;cursor:pointer;}
 .rb-check:hover{border-color:var(--good);}
 .rb-check.done{background:var(--good);border-color:var(--good);animation:rbPop .4s ease;}
+.rb-spin{animation:rbSpin .8s linear infinite;}
+@keyframes rbSpin{to{transform:rotate(360deg);}}
 @keyframes rbPop{0%{transform:scale(1)}45%{transform:scale(1.25)}100%{transform:scale(1)}}
 .rb-task.completing{animation:rbSlideOut .45s ease forwards;}
 @keyframes rbSlideOut{60%{opacity:1}100%{opacity:0;transform:translateX(14px)}}
@@ -681,6 +683,55 @@ export default function TidepoolReefApp() {
   return <ErrorBoundary><TidepoolReef /></ErrorBoundary>;
 }
 
+/* Pull-to-refresh: only engages at the top of the page, mimics native rubber-band. */
+function usePullToRefresh(onRefresh, refreshing) {
+  useEffect(() => {
+    let startY = 0, pulling = false, pulled = 0;
+    const THRESHOLD = 70;
+    const indicator = () => document.getElementById("rb-ptr");
+
+    const setPull = (px) => {
+      const el = indicator();
+      if (!el) return;
+      const p = Math.min(px, 90);
+      el.style.transform = `translateX(-50%) translateY(${p - 46}px)`;
+      el.style.opacity = String(Math.min(1, px / THRESHOLD));
+      el.querySelector("svg").style.transform = `rotate(${px * 3}deg)`;
+    };
+    const reset = () => { const el = indicator(); if (el) { el.style.transform = "translateX(-50%) translateY(-46px)"; el.style.opacity = "0"; } };
+
+    const onStart = (e) => {
+      // only when scrolled to the very top
+      if (window.scrollY > 2) { pulling = false; return; }
+      startY = e.touches[0].clientY; pulling = true; pulled = 0;
+    };
+    const onMove = (e) => {
+      if (!pulling || refreshing) return;
+      const dy = e.touches[0].clientY - startY;
+      if (dy > 0 && window.scrollY <= 2) {
+        pulled = dy * 0.5;              // rubber-band damping
+        setPull(pulled);
+        if (dy > 6) e.preventDefault();  // stop the page from also scrolling
+      }
+    };
+    const onEnd = () => {
+      if (!pulling) return;
+      pulling = false;
+      if (pulled >= THRESHOLD && !refreshing) onRefresh();
+      reset();
+    };
+
+    document.addEventListener("touchstart", onStart, { passive: true });
+    document.addEventListener("touchmove", onMove, { passive: false });
+    document.addEventListener("touchend", onEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onStart);
+      document.removeEventListener("touchmove", onMove);
+      document.removeEventListener("touchend", onEnd);
+    };
+  }, [onRefresh, refreshing]);
+}
+
 function TidepoolReef() {
   const [state, setState] = useState(null);
   const [view, setView] = useState("tank");        // feed|library|shop|tasks|profile|params|tanklog|reefid|deepdive|notifications|messages|purchases|seller|settings
@@ -704,6 +755,18 @@ function TidepoolReef() {
   useEffect(() => {
     if (session && session.user) { setState(null); fetchAll(session.user.id).then(setState).catch((e) => console.error("load failed", e)); }
   }, [session && session.user && session.user.id]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const refresh = async () => {
+    if (!session || !session.user || refreshing) return;
+    setRefreshing(true);
+    try {
+      const fresh = await fetchAll(session.user.id);
+      setState(fresh);   // swap in place — no full-screen loader
+    } catch (e) { console.error("refresh failed", e); }
+    setRefreshing(false);
+  };
+  usePullToRefresh(refresh, refreshing);
 
   const latest = useMemo(() => (state && state.history.length ? state.history[state.history.length - 1] : null), [state]);
   const award = async (n) => {
@@ -863,6 +926,18 @@ function TidepoolReef() {
   return (
     <div className="rb-root">
       <style>{STYLES}</style>
+
+      {/* pull-to-refresh indicator */}
+      <div id="rb-ptr" style={{
+        position: "fixed", top: 8, left: "50%", zIndex: 200,
+        transform: "translateX(-50%) translateY(-46px)", opacity: 0,
+        width: 38, height: 38, borderRadius: "50%", background: "var(--bg-2)",
+        border: "1px solid var(--brd-2)", display: "grid", placeItems: "center",
+        boxShadow: "0 6px 20px -6px rgba(0,0,0,.6)", pointerEvents: "none",
+        transition: refreshing ? "none" : "transform .25s, opacity .25s",
+      }} ref={(el) => { if (el && refreshing) { el.style.transform = "translateX(-50%) translateY(8px)"; el.style.opacity = "1"; } }}>
+        <RefreshCw size={18} color="var(--aqua)" className={refreshing ? "rb-spin" : ""} />
+      </div>
 
       {/* top bar */}
       <div className="rb-shell">
