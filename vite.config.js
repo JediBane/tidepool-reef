@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: "Tidepool Reef",
         short_name: "Tidepool",
-        description: "Track your reef tank, join the community, and get AI-powered answers with DeepDive and ReefID.",
+        description: "Track your reef, get AI diagnosis, and ID any coral from a photo — with a species library built by real reefers, not scraped from stores.",
         id: "/",
         start_url: "/",
         display: "standalone",
