@@ -830,8 +830,8 @@ function AuthScreen() {
               body="Log alk, calcium, nitrate and more. See trends over time, get a weighted tank health score, and catch problems before they cost you corals." />
             <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
             <FeatureRow c="#ffc24d" icon={<BookOpen size={20} color="#ffc24d" />}
-              title="Reefpedia — 300+ species & zoa morphs"
-              body="A built-in library of fish, corals, inverts, pests, and named zoanthid morphs, with real photos and care basics for each." />
+              title="Reefpedia — a library built by reefers"
+              body="300+ fish, corals, inverts, pests, and named zoa morphs with care basics for each — and a growing gallery of real specimen photos contributed by the community, not scraped from stores. See a coral you keep? Add your photo and help others ID it." />
             <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
             <FeatureRow c="#ff7a9e" icon={<Store size={20} color="#ff7a9e" />}
               title="Frag marketplace"
@@ -840,11 +840,15 @@ function AuthScreen() {
             <FeatureRow c="#3ce0a3" icon={<Users size={20} color="#3ce0a3" />}
               title="A real reef community"
               body="Share tank updates and photos, ask for help, follow other reefers, and see who keeps the corals you're eyeing." />
+            <div style={{ borderTop: "1px solid rgba(255,255,255,.06)" }} />
+            <FeatureRow c="#ff9d3c" icon={<Camera size={20} color="#ff9d3c" />}
+              title="Built by the community, owned by everyone"
+              body="Every specimen photo is a real tank shot shared by a reefer who keeps it — consented, credited, and moderated. The library gets richer and more accurate every day, because it's built by the people using it." />
           </div>
 
           {/* VALUE STRIP */}
           <div style={{ display: "flex", gap: 10, marginTop: 16, textAlign: "center" }}>
-            {[["300+", "species & morphs"], ["8", "parameters tracked"], ["AI", "tank diagnosis"]].map(([v, k], i) => (
+            {[["300+", "species & morphs"], ["100%", "real community photos"], ["AI", "tank diagnosis"]].map(([v, k], i) => (
               <div key={i} className="rb-card" style={{ flex: 1, padding: "14px 6px" }}>
                 <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20, background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>{v}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, lineHeight: 1.3 }}>{k}</div>
