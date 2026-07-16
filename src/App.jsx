@@ -4174,19 +4174,20 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
   const [addOpen, setAddOpen] = useState(false);
   const [added, setAdded] = useState("");
   const [img, setImg] = useState(null);     // {b64, media, url}
-  const [result, setResult] = useState("");
+  const [result, setResult] = useState("");     // raw text fallback
+  const [card, setCard] = useState(null);       // parsed {common, scientific, type, difficulty, confidence, tips[], note}
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); setAdded(""); setAddOpen(false); });
+    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); setCard(null); setAdded(""); setAddOpen(false); });
   };
 
   const identify = async () => {
     if (!img) return;
     if (!(await gateAI("reefid"))) return;
-    setBusy(true); setResult("");
+    setBusy(true); setResult(""); setCard(null);
     try {
       const token = await getAccessToken();
       const res = await fetch("/api/chat", {
@@ -4195,10 +4196,10 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
         body: JSON.stringify({
           max_tokens: 1000,
           kind: "reefid",
-          system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species. Reply with: Common name, Scientific name (best guess), Type, Care difficulty, and 2 quick care tips. If you can't tell, say so and list possibilities. Keep it concise.",
+          system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species from the image. Respond with ONLY a JSON object, no markdown, no preamble, in exactly this shape: {\"common\":\"common name\",\"scientific\":\"Genus species (best guess)\",\"type\":\"Coral|Fish|Invert\",\"difficulty\":\"Beginner|Intermediate|Advanced|Expert\",\"confidence\":\"High|Medium|Low\",\"tips\":[\"short care tip\",\"short care tip\",\"short care tip\"],\"note\":\"one short caveat or alternate possibility if unsure, else empty string\"}. Keep every field concise. If you truly cannot tell, set common to \"Unclear\" and use note to list possibilities.",
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: img.media, data: img.b64 } },
-            { type: "text", text: "Identify this reef tank inhabitant and give quick care basics." },
+            { type: "text", text: "Identify this reef tank inhabitant and give quick care basics as JSON." },
           ] }],
         }),
       });
@@ -4209,7 +4210,15 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
       }
       if (data && data._serverCounted) AI_GATE_STATE.serverCounts = true;
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-      setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
+      // Try to parse the JSON card; fall back to raw text if the model didn't comply.
+      let parsed = null;
+      try {
+        const jsonStr = txt.replace(/```json|```/g, "").trim();
+        const start = jsonStr.indexOf("{"), end = jsonStr.lastIndexOf("}");
+        if (start !== -1 && end !== -1) parsed = JSON.parse(jsonStr.slice(start, end + 1));
+      } catch (e) { parsed = null; }
+      if (parsed && parsed.common) setCard(parsed);
+      else setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
     setBusy(false);
   };
@@ -4220,7 +4229,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
       )}
       <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
         <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 14 }}>
-          Snap or upload a photo of any coral, fish, or invert and DeepDive will identify it and give you care basics.
+          Point your camera at any coral, fish, or invert. Reef ID names the species, rates its care difficulty, and gives you quick care tips — then adds it to your tank in a tap.
         </div>
         <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onFile} />
         {img
@@ -4234,6 +4243,72 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
         </div>
       </div>
       {busy && <div className="rb-card" style={{ padding: 16, marginTop: 14 }}><div className="rb-typing"><i /><i /><i /></div></div>}
+
+      {card && (() => {
+        const diffColors = { Beginner: "#3ce0a3", Intermediate: "#ffc24d", Advanced: "#ff9d5c", Expert: "#ff5d72" };
+        const confColors = { High: "#3ce0a3", Medium: "#ffc24d", Low: "#ff9d5c" };
+        const dc = diffColors[card.difficulty] || "#3fe3ff";
+        const cc = confColors[card.confidence] || "var(--muted)";
+        const kindColor = { Coral: "var(--teal)", Fish: "var(--aqua)", Invert: "var(--violet)" }[card.type] || "var(--aqua)";
+        return (
+          <div className="rb-card" style={{ padding: 0, marginTop: 14, overflow: "hidden" }}>
+            {/* Header band with the photo */}
+            <div style={{ position: "relative", height: 150 }}>
+              {img && <img src={img.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,transparent 30%,rgba(3,8,12,.92))" }} />
+              <div style={{ position: "absolute", left: 14, right: 14, bottom: 12 }}>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 22, lineHeight: 1.1, letterSpacing: "-.3px" }}>{card.common}</div>
+                {card.scientific && <div style={{ fontStyle: "italic", color: "var(--muted)", fontSize: 13, marginTop: 2 }}>{card.scientific}</div>}
+              </div>
+            </div>
+            <div style={{ padding: 16 }}>
+              {/* Badges */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+                {card.type && <span className="rb-badge" style={{ background: kindColor + "22", color: kindColor, border: `1px solid ${kindColor}55` }}>{card.type}</span>}
+                {card.difficulty && <span className="rb-badge" style={{ background: dc + "22", color: dc, border: `1px solid ${dc}55` }}>{card.difficulty} care</span>}
+                {card.confidence && <span className="rb-badge" style={{ background: "transparent", color: cc, border: `1px solid ${cc}55` }}>{card.confidence} confidence</span>}
+              </div>
+              {/* Care tips */}
+              {Array.isArray(card.tips) && card.tips.length > 0 && (
+                <div style={{ marginBottom: card.note ? 12 : 0 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700, letterSpacing: .3, marginBottom: 8 }}>QUICK CARE</div>
+                  {card.tips.map((tip, i) => (
+                    <div key={i} style={{ display: "flex", gap: 9, marginBottom: 8, fontSize: 13.5, lineHeight: 1.45 }}>
+                      <Check size={15} color="var(--good)" style={{ flex: "none", marginTop: 2 }} /><span>{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {card.note && <div style={{ fontSize: 12.5, color: "var(--muted)", fontStyle: "italic", lineHeight: 1.45, borderTop: "1px solid rgba(255,255,255,.06)", paddingTop: 10 }}>{card.note}</div>}
+
+              {/* Add to tank */}
+              {tanks && tanks.length > 0 && card.common !== "Unclear" && (
+                <div style={{ marginTop: 14 }}>
+                  {added ? (
+                    <div style={{ fontSize: 13, color: "var(--good)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><Check size={14} /> Added to {added}!</div>
+                  ) : !addOpen ? (
+                    <button className="rb-btn" style={{ width: "100%" }} onClick={() => setAddOpen(true)}><Plus size={15} /> Add to my tank</button>
+                  ) : (
+                    <div>
+                      <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 8 }}>Which tank?</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {tanks.map((tk) => (
+                          <div key={tk.id} className="rb-chip" style={{ fontSize: 12 }} onClick={async () => {
+                            const kind = card.type === "Fish" ? "Fish" : card.type === "Invert" ? "Invert" : "Coral";
+                            await addTo(tk.id, kind, card.common, null);
+                            setAdded(tk.name); setAddOpen(false);
+                          }}>{tk.name}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {result && (
         <div className="rb-card" style={{ padding: 16, marginTop: 14, fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
           {result}
@@ -4249,7 +4324,6 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     {tanks.map((tk) => (
                       <div key={tk.id} className="rb-chip" style={{ fontSize: 12 }} onClick={async () => {
-                        // Parse best-guess name + kind from the AI's answer
                         const firstLine = result.split("\n").find((l) => l.trim()) || "Identified species";
                         const name = (firstLine.match(/Common name[:\s]*([^\n(]+)/i) || [null, firstLine])[1].trim().replace(/^[-*#\s]+/, "").slice(0, 60);
                         const lower = result.toLowerCase();
