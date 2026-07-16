@@ -3136,9 +3136,9 @@ const CORAL_GROUPS = {
   ],
   LPS: [
     ["Euphyllia (Hammer/Torch/Frog)", /euphyllia|hammer|torch|frogspawn/i],
-    ["Brains", /brain|trachyphyllia|lobophyllia|symphyllia|favia|platygyra|diploastrea|open brain|scoly|homophyllia|cynarina/i],
-    ["Acans & Micromussa", /acan|acanthastrea|micromussa|blastomussa/i],
-    ["Chalices & Favites", /chalice|echinophyllia|favites|war coral|leptastrea|cyphastrea|pectinia/i],
+    ["Brains", /brain|trachyphyllia|lobophyllia|symphyllia|favia|platygyra|diploastrea|open brain|scoly|homophyllia|cynarina|goniastrea|wellsophyllia/i],
+    ["Acans & Micromussa", /acan|acanthastrea|micromussa|blastomussa|bowerbanki/i],
+    ["Chalices & Favites", /chalice|echinophyllia|oxypora|favites|war coral|leptastrea|cyphastrea|pectinia/i],
     ["Plates & Fungia", /plate |fungia|tongue|herpolitha/i],
     ["Bubble, Elegance & Fleshy", /bubble|plerogyra|physogyra|elegance|catalaphyllia|meat coral|acanthophyllia|fox coral/i],
     ["Flowerpot & Star", /goniopora|alveopora|galaxea|duncan/i],
@@ -3149,7 +3149,7 @@ const CORAL_GROUPS = {
     ["Leathers", /leather|sarcophyton|sinularia|lobophytum|cladiella|capnella|colt|kenya|litophyton|tree coral/i],
     ["Mushrooms", /mushroom|discosoma|rhodactis|ricordea|bounce|jawbreaker/i],
     ["Zoas & Palys", /zoanthid|palythoa|parazoanthus|yellow polyp/i],
-    ["Pulsing & Polyps", /xenia|anthelia|clove|pipe organ|tubipora|sympodium|star polyp|briareum/i],
+    ["Pulsing & Polyps", /xenia|anthelia|clove|pipe organ|tubipora|sympodium|star polyp|briareum|clavularia|pachyclavularia/i],
     ["Gorgonians", /gorgonian|antillogorgia/i],
   ],
 };
