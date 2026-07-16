@@ -696,7 +696,13 @@ function AuthScreen() {
       if (mode === "signup") {
         const clean = handle.trim().replace(/[^a-zA-Z0-9_]/g, "");
         if (clean.length < 2) { setMsg("Pick a handle (letters, numbers, underscores)."); setBusy(false); return; }
-        const { data, error } = await supabase.auth.signUp({ email: email.trim(), password: pw, options: { data: { handle: clean } } });
+        const redirectBase = (typeof window !== "undefined" && window.location && window.location.origin && !window.location.origin.includes("localhost"))
+          ? window.location.origin
+          : "https://reefpulse-app.netlify.app";
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(), password: pw,
+          options: { data: { handle: clean }, emailRedirectTo: redirectBase },
+        });
         if (error) setMsg(error.message);
         else if (!data.session) setMsg("Check your email to confirm your account, then sign in.");
       } else {
