@@ -1564,14 +1564,21 @@ function TidepoolReef() {
     if (error) { console.error("renameTank failed:", error.message); alert("Couldn't rename — try again."); }
   };
   const deleteTank = async (id) => {
-    if (state.tanks.length <= 1) { alert("You need at least one tank. Create another before deleting this one."); return; }
     const prev = state.tanks;
     const remaining = prev.filter((t) => t.id !== id);
-    const nextActive = state.tankId === id ? remaining[0].id : state.tankId;
     setState((s) => ({ ...s, tanks: remaining }));
     const { error } = await supabase.from("tanks").delete().eq("id", id);
     if (error) { console.error("deleteTank failed:", error.message); setState((s) => ({ ...s, tanks: prev })); alert("Couldn't delete tank — try again."); return; }
-    if (state.tankId === id) { try { localStorage.setItem("tr:tank", nextActive); } catch (e) {} await switchTank(nextActive); }
+    if (remaining.length === 0) {
+      // No tanks left — clear active and let the app fall back to onboarding.
+      try { localStorage.removeItem("tr:tank"); } catch (e) {}
+      setState((s) => ({ ...s, tankId: null, tank: null }));
+      await refresh();
+    } else if (state.tankId === id) {
+      const nextActive = remaining[0].id;
+      try { localStorage.setItem("tr:tank", nextActive); } catch (e) {}
+      await switchTank(nextActive);
+    }
   };
 
   const TITLES = { tank: "My Tank", log: "Tank Log", deepdive: "Tidepool DeepDive", community: "Community", profile: "My Profile",
@@ -1627,7 +1634,7 @@ function TidepoolReef() {
         </div>
 
         {/* views */}
-        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
+        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid: state.uid, profile: state.profile }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} uid={session.user.id} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
@@ -1721,21 +1728,31 @@ function TidepoolReef() {
 }
 
 /* ---------------- Tank switcher ---------------- */
-function TankSwitcher({ tanks, tankId, switchTank }) {
-  if (!tanks || tanks.length < 2) return null;
+function TankSwitcher({ tanks, tankId, switchTank, createTank }) {
+  const [addOpen, setAddOpen] = useState(false);
+  // Always render when we can add tanks, so "+ Add tank" is discoverable even with one tank.
+  if ((!tanks || tanks.length < 2) && !createTank) return null;
   return (
-    <div className="rb-tabs" style={{ marginTop: 4 }}>
-      {tanks.map((t) => (
-        <div key={t.id} className={"rb-chip" + (t.id === tankId ? " on" : "")} onClick={() => switchTank(t.id)}>
-          {t.name} <span style={{ opacity: .65, fontSize: 11 }}>· {t.volume}g</span>
-        </div>
-      ))}
-    </div>
+    <>
+      <div className="rb-tabs" style={{ marginTop: 4 }}>
+        {tanks.map((t) => (
+          <div key={t.id} className={"rb-chip" + (t.id === tankId ? " on" : "")} onClick={() => switchTank(t.id)}>
+            {t.name} <span style={{ opacity: .65, fontSize: 11 }}>· {t.volume}g</span>
+          </div>
+        ))}
+        {createTank && (
+          <div className="rb-chip" style={{ borderStyle: "dashed", color: "var(--aqua)", borderColor: "var(--brd-2)" }} onClick={() => setAddOpen(true)}>
+            <Plus size={13} style={{ verticalAlign: -2, marginRight: 3 }} />Add tank
+          </div>
+        )}
+      </div>
+      {addOpen && createTank && <NewTankSheet onClose={() => setAddOpen(false)} onCreate={createTank} />}
+    </>
   );
 }
 
 /* ---------------- Tank (home) ---------------- */
-function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
+function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank }) {
   const t = state.tank;
   // Health from each parameter's LAST KNOWN value, weighted by real reef impact
   // (temp/salinity/alk swings hurt far more than a slightly-off magnesium).
@@ -1758,7 +1775,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
   const lastLog = state.log[0];
   return (
     <div className="rb-fadein">
-      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} />
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} createTank={createTank} />
       <div className="rb-tankhero" style={{ marginTop: 4, height: 190 }}>
         <div className="light" /><div className="rock" />
         <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
@@ -4953,7 +4970,7 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
             <span style={{ color: "var(--muted)", cursor: "pointer", padding: "6px 8px", fontSize: 12.5, flex: "none" }}
               onClick={() => { const nm = prompt("Rename tank:", t.name); if (nm != null) renameTank(t.id, nm); }}>Rename</span>
             <span style={{ color: state.tanks.length > 1 ? "var(--bad)" : "var(--muted-2)", cursor: state.tanks.length > 1 ? "pointer" : "not-allowed", padding: "6px 8px", fontSize: 12.5, flex: "none" }}
-              onClick={() => { if (state.tanks.length <= 1) { alert("You need at least one tank."); return; } if (confirm(`Delete "${t.name}"? This removes its readings, livestock, and journal permanently.`)) deleteTank(t.id); }}>Delete</span>
+              onClick={() => { if (confirm(`Delete "${t.name}"? This removes its readings, livestock, and journal permanently.`)) deleteTank(t.id); }}>Delete</span>
           </div>
         ))}
       </div>
