@@ -228,7 +228,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-ai-msg{padding:11px 14px;border-radius:15px;font-size:13.5px;line-height:1.5;max-width:88%;white-space:pre-wrap;}
 .rb-ai-msg.u{align-self:flex-end;background:linear-gradient(120deg,var(--aqua-d),var(--aqua));color:var(--bg-0);font-weight:500;}
 .rb-ai-msg.a{align-self:flex-start;background:rgba(255,255,255,.05);border:1px solid var(--brd);}
-.rb-ai-row{display:flex;gap:9px;position:sticky;bottom:0;}
+.rb-ai-row{display:flex;gap:9px;position:sticky;bottom:0;background:linear-gradient(180deg,rgba(5,18,27,0),var(--bg-1) 26%);padding-top:12px;}
 .rb-typing{display:flex;gap:5px;padding:4px 0}.rb-typing i{width:7px;height:7px;border-radius:50%;background:var(--aqua);animation:rbBlink 1.2s infinite}
 .rb-typing i:nth-child(2){animation-delay:.2s}.rb-typing i:nth-child(3){animation-delay:.4s}
 @keyframes rbBlink{0%,60%,100%{opacity:.25}30%{opacity:1}}
@@ -282,7 +282,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   .rb-qcard{width:300px;}
   .rb-tcard{width:220px;}
   .rb-hscroll{padding:0 24px 6px;margin:0 -24px;}
-  .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
+  .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:start;}
   .rb-postgrid .rb-post{margin-bottom:0;}
   .rb-overlay{align-items:flex-start;padding:24px;overflow-y:auto;}
   .rb-overlay > .rb-sheet{margin:auto;}
@@ -2606,7 +2606,7 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following
                 <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55`, flex: "none" }}>{post.tag}</span>
               </div>
               <div className="rb-pbody">{post.body}</div>
-              {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ objectFit: "cover", width: "100%" }} />}
+              {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: 170, flexShrink: 0, objectFit: "cover", width: "100%" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
               <div className="rb-pacts">
                 <span className={isLiked ? "liked" : ""} onClick={(e) => { e.stopPropagation(); toggleLike(post.id); }}>
                   <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
@@ -2733,7 +2733,7 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
           <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
         </div>
         <div className="rb-pbody">{post.body}</div>
-        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: "auto", maxHeight: "60vh", objectFit: "contain", width: "100%", background: "rgba(3,8,12,.5)" }} />}
+        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: "auto", maxHeight: "60vh", objectFit: "contain", width: "100%", background: "rgba(3,8,12,.5)" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
         <div className="rb-pacts" style={{ marginBottom: 16 }}>
           <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
             <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
