@@ -3047,6 +3047,23 @@ function SpeciesPhoto({ item, height, radius = 0 }) {
 
 const CAT_COLOR = { Fish: "#ff7a5c", SPS: "#2ee6c8", LPS: "#3fe3ff", Soft: "#b06cff", Invert: "#ffc24d", Pest: "#ff5d72" };
 
+/* Fish-family grouping for the Library — keyword-based so new entries self-classify. */
+const FISH_FAMILIES = [
+  ["Clownfish", /clownfish|amphiprion|premnas|ocellaris|percula|maroon/i],
+  ["Tangs & Surgeonfish", /tang\b|zebrasoma|acanthurus|ctenochaetus|naso|foxface|siganus/i],
+  ["Wrasses", /wrasse|halichoeres|cirrhilabrus|paracheilinus|macropharyngodon|pseudocheilin|wetmorella/i],
+  ["Gobies, Blennies & Dragonets", /goby|blenny|mandarin|dragonet|synchiropus|gobiodon|amblyeleotris|stonogobiops|salarias|jawfish|engineer|watchman/i],
+  ["Anthias, Basslets & Dottybacks", /anthias|gramma|basslet|dottyback|pseudochromis|chalk bass|serranocirrhitus/i],
+  ["Angels & Butterflies", /angelfish|centropyge|pygoplites|butterfly|chelmon/i],
+  ["Cardinals, Damsels & Chromis", /cardinal|damsel|chromis|chrysiptera/i],
+  ["Firefish & Dartfish", /firefish|dartfish|nemateleotris/i],
+];
+function fishFamily(item) {
+  const hay = item.name + " " + item.sci;
+  for (const [fam, re] of FISH_FAMILIES) if (re.test(hay)) return fam;
+  return "More Reef Fish";
+}
+
 function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
   const [q, setQ] = useState("");
   const [diffFilter, setDiffFilter] = useState("All");
@@ -3086,33 +3103,53 @@ function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
       )}
       {isZoa && <ZoaGuide onAddToTank={onAddToTank} />}
       {!isZoa && shown.length === 0 && <div className="rb-card rb-empty">Nothing matches{q ? ` “${q}”` : " these filters"}. Try a common name, a genus, or a symptom{diffFilter !== "All" ? " — or clear the care-level filter" : ""}.</div>}
-      {!isZoa && <div className="rb-mgrid">
-        {shown.map((l) => (
-          <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
-            <div style={{ position: "relative" }}>
-              <SpeciesPhoto item={l} height={120} />
-              <span className="cat" style={{ position: "absolute", top: 8, left: 8, fontSize: 10, background: "rgba(3,8,12,.72)",
-                padding: "3px 8px", borderRadius: 20, backdropFilter: "blur(6px)", border: `1px solid ${CAT_COLOR[l.cat]}66`, color: CAT_COLOR[l.cat] }}>
-                {l.cat}
-              </span>
-            </div>
-            <div className="rb-mbody">
-              <div className="t">{l.name}</div>
-              <div className="sci">{l.sci}</div>
-              <div className="rb-care">
-                <span style={{ color: diffColor[l.diff] || "var(--bad)", borderColor: (diffColor[l.diff] || "#ff5d72") + "66" }}>
-                  {l.diff === "Pest" ? "Pest" : l.diff}
-                </span>
-                {counts && counts[l.id] > 0 && (
-                  <span style={{ color: "var(--aqua)", borderColor: "var(--brd-2)" }}>
-                    <Users size={9} style={{ verticalAlign: -1, marginRight: 3 }} />{counts[l.id]}
-                  </span>
-                )}
+      {!isZoa && libCat === "Fish" && !query ? (
+        // Field-guide chapters: group fish by family. Search switches back to a flat list.
+        [...FISH_FAMILIES.map(([fam]) => fam), "More Reef Fish"].map((fam) => {
+          const members = shown.filter((l) => fishFamily(l) === fam);
+          if (!members.length) return null;
+          return (
+            <div key={fam}>
+              <div className="rb-h2" style={{ marginTop: 18 }}>{fam} <small>{members.length}</small></div>
+              <div className="rb-mgrid">
+                {members.map((l) => <LibCard key={l.id} l={l} counts={counts} openItem={openItem} />)}
               </div>
             </div>
-          </div>
-        ))}
-      </div>}
+          );
+        })
+      ) : !isZoa && (
+        <div className="rb-mgrid">
+          {shown.map((l) => <LibCard key={l.id} l={l} counts={counts} openItem={openItem} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LibCard({ l, counts, openItem }) {
+  return (
+    <div className="rb-card rb-mcard" onClick={() => openItem(l)}>
+      <div style={{ position: "relative" }}>
+        <SpeciesPhoto item={l} height={120} />
+        <span className="cat" style={{ position: "absolute", top: 8, left: 8, fontSize: 10, background: "rgba(3,8,12,.72)",
+          padding: "3px 8px", borderRadius: 20, backdropFilter: "blur(6px)", border: `1px solid ${CAT_COLOR[l.cat]}66`, color: CAT_COLOR[l.cat] }}>
+          {l.cat}
+        </span>
+      </div>
+      <div className="rb-mbody">
+        <div className="t">{l.name}</div>
+        <div className="sci">{l.sci}</div>
+        <div className="rb-care">
+          <span style={{ color: diffColor[l.diff] || "var(--bad)", borderColor: (diffColor[l.diff] || "#ff5d72") + "66" }}>
+            {l.diff === "Pest" ? "Pest" : l.diff}
+          </span>
+          {counts && counts[l.id] > 0 && (
+            <span style={{ color: "var(--aqua)", borderColor: "var(--brd-2)" }}>
+              <Users size={9} style={{ verticalAlign: -1, marginRight: 3 }} />{counts[l.id]}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
