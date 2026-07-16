@@ -691,6 +691,46 @@ function FeatureRow({ icon, title, body, c }) {
   );
 }
 
+function ResetPasswordScreen({ onDone }) {
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (pw.length < 6) { setMsg("Password must be at least 6 characters."); return; }
+    if (pw !== pw2) { setMsg("Passwords don't match."); return; }
+    setBusy(true); setMsg("");
+    const { error } = await supabase.auth.updateUser({ password: pw });
+    setBusy(false);
+    if (error) { setMsg(error.message); return; }
+    alert("Password updated. You're all set!");
+    onDone();
+  };
+  return (
+    <div className="rb-root"><style>{STYLES}</style>
+      <div className="rb-shell" style={{ paddingTop: 60 }}>
+        <div style={{ maxWidth: 420, margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><CoralAvatar size={72} /></div>
+          <ReefLogo />
+          <div className="rb-card" style={{ padding: 18, marginTop: 26, border: "1px solid rgba(63,227,255,.25)" }}>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 18, marginBottom: 4 }}>Set a new password</div>
+            <div style={{ color: "var(--muted)", fontSize: 13, marginBottom: 14 }}>Choose a new password for your account.</div>
+            <div className="rb-field"><label>New password</label>
+              <input className="rb-input" type="password" placeholder="••••••••" value={pw} onChange={(e) => setPw(e.target.value)} /></div>
+            <div className="rb-field"><label>Confirm password</label>
+              <input className="rb-input" type="password" placeholder="••••••••" value={pw2} onChange={(e) => setPw2(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && pw && pw2 && !busy) save(); }} /></div>
+            {msg && <div style={{ color: "var(--warn)", fontSize: 13, marginBottom: 10 }}>{msg}</div>}
+            <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!pw || !pw2 || busy} onClick={save}>
+              {busy ? "Saving…" : "Update password"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AuthScreen() {
   const [mode, setMode] = useState("signup"); // land on signup — this is a new-visitor funnel
   const [email, setEmail] = useState("");
@@ -715,14 +755,35 @@ function AuthScreen() {
           email: email.trim(), password: pw,
           options: { data: { handle: clean }, emailRedirectTo: redirectBase },
         });
-        if (error) setMsg(error.message);
-        else if (!data.session) setMsg("Check your email to confirm your account, then sign in.");
+        if (error) {
+          // Supabase sometimes surfaces the dup directly
+          if (/already|registered|exists/i.test(error.message)) {
+            setMsg("That email is already registered. Try signing in, or reset your password below.");
+            setMode("signin");
+          } else setMsg(error.message);
+        } else if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+          // Existing email: Supabase returns a user with an empty identities array and sends no email.
+          setMsg("That email is already registered. Try signing in, or reset your password below.");
+          setMode("signin");
+        } else if (!data.session) {
+          setMsg("Check your email to confirm your account, then sign in.");
+        }
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password: pw });
         if (error) setMsg(error.message);
       }
     } catch (e) { setMsg("Something went wrong — try again."); }
     setBusy(false);
+  };
+
+  const forgotPassword = async () => {
+    if (!email.trim()) { setMsg("Enter your email above first, then tap reset."); return; }
+    setBusy(true); setMsg("");
+    const redirectBase = (typeof window !== "undefined" && window.location && window.location.origin && !window.location.origin.includes("localhost"))
+      ? window.location.origin : "https://reefpulse-app.netlify.app";
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectBase + "?reset=1" });
+    setBusy(false);
+    setMsg(error ? error.message : "If that email has an account, a password reset link is on its way.");
   };
 
   return (
@@ -814,6 +875,13 @@ function AuthScreen() {
             {mode === "signup" && (
               <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
                 Already have an account? <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setMode("signin")}>Sign in</span>
+              </div>
+            )}
+            {mode === "signin" && (
+              <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
+                <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={forgotPassword}>Forgot password?</span>
+                <span style={{ margin: "0 8px", opacity: .4 }}>·</span>
+                New here? <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setMode("signup")}>Create account</span>
               </div>
             )}
           </div>
@@ -1048,12 +1116,15 @@ function TidepoolReef() {
   const [toast, setToast] = useState(0);
 
   const [session, setSession] = useState(undefined); // undefined=checking, null=signed out
+  const [recovery, setRecovery] = useState(false);    // password-reset return
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
+    if (typeof window !== "undefined" && (window.location.search.includes("reset=1") || window.location.hash.includes("type=recovery"))) setRecovery(true);
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      if (_e === "PASSWORD_RECOVERY") setRecovery(true);
       setSession(s);
       // After the email-confirm token is consumed, strip it from the URL bar.
-      if (s && typeof window !== "undefined" && (window.location.hash.includes("access_token") || window.location.search.includes("code="))) {
+      if (s && typeof window !== "undefined" && (window.location.hash.includes("access_token") || window.location.search.includes("code=")) && !window.location.hash.includes("type=recovery")) {
         window.history.replaceState({}, "", window.location.pathname);
       }
     });
@@ -1154,6 +1225,7 @@ function TidepoolReef() {
     return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
       <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
   }
+  if (recovery) return <ResetPasswordScreen onDone={() => { setRecovery(false); if (typeof window !== "undefined") window.history.replaceState({}, "", window.location.pathname); }} />;
   if (session === null) return <AuthScreen />;
   if (!state) {
     return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
