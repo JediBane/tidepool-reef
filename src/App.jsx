@@ -1118,6 +1118,26 @@ function TidepoolReef() {
   const [session, setSession] = useState(undefined); // undefined=checking, null=signed out
   const [recovery, setRecovery] = useState(false);    // password-reset return
   useEffect(() => {
+    // Handle the "token_hash" style confirm/recovery return (newer Supabase links).
+    // detectSessionInUrl covers the #access_token hash flow; this covers ?token_hash=...&type=...
+    // which otherwise leaves the user logged-out on a blank page.
+    (async () => {
+      try {
+        if (typeof window === "undefined") return;
+        const url = new URL(window.location.href);
+        const token_hash = url.searchParams.get("token_hash");
+        const type = url.searchParams.get("type");
+        if (token_hash && type) {
+          const { error } = await supabase.auth.verifyOtp({ token_hash, type });
+          if (!error) {
+            if (type === "recovery") setRecovery(true);
+            window.history.replaceState({}, "", window.location.pathname);
+          } else {
+            console.error("verifyOtp failed:", error.message);
+          }
+        }
+      } catch (e) { console.error("confirm-return handling error", e); }
+    })();
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
     if (typeof window !== "undefined" && (window.location.search.includes("reset=1") || window.location.hash.includes("type=recovery"))) setRecovery(true);
     const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
