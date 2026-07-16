@@ -4176,31 +4176,36 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
   const [added, setAdded] = useState("");
   const [img, setImg] = useState(null);     // {b64, media, url}
   const [result, setResult] = useState("");     // raw text fallback
-  const [card, setCard] = useState(null);       // parsed {common, scientific, type, difficulty, confidence, tips[], note}
+  const [card, setCard] = useState(null);       // parsed ID card
   const [busy, setBusy] = useState(false);
+  const [followMsgs, setFollowMsgs] = useState([]);   // follow-up Q&A after an ID
+  const [followInput, setFollowInput] = useState("");
+  const [followBusy, setFollowBusy] = useState(false);
   const fileRef = useRef(null);
+  const followScroll = useRef(null);
+  useEffect(() => { if (followScroll.current) followScroll.current.scrollTop = followScroll.current.scrollHeight; }, [followMsgs, followBusy]);
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); setCard(null); setAdded(""); setAddOpen(false); });
+    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); setCard(null); setAdded(""); setAddOpen(false); setFollowMsgs([]); });
   };
 
   const identify = async () => {
     if (!img) return;
     if (!(await gateAI("reefid"))) return;
-    setBusy(true); setResult(""); setCard(null);
+    setBusy(true); setResult(""); setCard(null); setFollowMsgs([]);
     try {
       const token = await getAccessToken();
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
         body: JSON.stringify({
-          max_tokens: 1000,
+          max_tokens: 1200,
           kind: "reefid",
-          system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species from the image. Respond with ONLY a JSON object, no markdown, no preamble, in exactly this shape: {\"common\":\"common name\",\"scientific\":\"Genus species (best guess)\",\"type\":\"Coral|Fish|Invert\",\"difficulty\":\"Beginner|Intermediate|Advanced|Expert\",\"confidence\":\"High|Medium|Low\",\"tips\":[\"short care tip\",\"short care tip\",\"short care tip\"],\"note\":\"one short caveat or alternate possibility if unsure, else empty string\"}. Keep every field concise. If you truly cannot tell, set common to \"Unclear\" and use note to list possibilities.",
+          system: "You are Reef ID, an expert at identifying saltwater aquarium corals, fish, and invertebrates from photos. Identify the most likely species from the image. Respond with ONLY a JSON object, no markdown, no preamble, in exactly this shape: {\"common\":\"common name\",\"scientific\":\"Genus species (best guess)\",\"type\":\"Coral|Fish|Invert\",\"difficulty\":\"Beginner|Intermediate|Advanced|Expert\",\"confidence\":\"High|Medium|Low\",\"overview\":\"1-2 sentence description of the species and what it looks like\",\"placement\":\"where to place/keep it (e.g. low-to-mid, sandbed, high flow) — for fish use 'swimming zone'\",\"lighting\":\"lighting needs (corals) or 'n/a' for fish/inverts\",\"flow\":\"water flow preference\",\"diet\":\"what and how to feed it\",\"temperament\":\"reef-safe? aggressive? compatibility notes\",\"tips\":[\"short care tip\",\"short care tip\",\"short care tip\"],\"watch\":[\"common problem or warning sign to watch for\",\"another\"],\"note\":\"one short caveat or alternate possibility if unsure, else empty string\"}. Keep every field concise (one line each). If you truly cannot tell, set common to \"Unclear\" and use note to list possibilities.",
           messages: [{ role: "user", content: [
             { type: "image", source: { type: "base64", media_type: img.media, data: img.b64 } },
-            { type: "text", text: "Identify this reef tank inhabitant and give quick care basics as JSON." },
+            { type: "text", text: "Identify this reef tank inhabitant and give detailed care info as JSON." },
           ] }],
         }),
       });
@@ -4211,7 +4216,6 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
       }
       if (data && data._serverCounted) AI_GATE_STATE.serverCounts = true;
       const txt = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n").trim();
-      // Try to parse the JSON card; fall back to raw text if the model didn't comply.
       let parsed = null;
       try {
         const jsonStr = txt.replace(/```json|```/g, "").trim();
@@ -4222,6 +4226,28 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
       else setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
     setBusy(false);
+  };
+
+  // Follow-up questions about the identified species — a mini conversation, free-tier gated.
+  const askFollowUp = async (text) => {
+    const q = (text || "").trim(); if (!q || followBusy) return;
+    if (!(await gateAI("deepdive"))) return;
+    const hist = [...followMsgs, { role: "user", content: q }];
+    setFollowMsgs(hist); setFollowInput(""); setFollowBusy(true);
+    const idContext = card
+      ? `The user just identified: ${card.common}${card.scientific ? " (" + card.scientific + ")" : ""}, a ${card.type}. Care summary — difficulty: ${card.difficulty}; placement: ${card.placement || "?"}; lighting: ${card.lighting || "?"}; flow: ${card.flow || "?"}; diet: ${card.diet || "?"}; temperament: ${card.temperament || "?"}.`
+      : "The user is asking about a reef species they just tried to identify.";
+    const SYS = "You are Tidepool Reef ID, an expert saltwater aquarium advisor. " + idContext +
+      " Answer the user's follow-up question about this species specifically. Be concise, practical, and friendly. 2-4 sentences unless more detail is clearly needed.";
+    try {
+      const apiMsgs = hist.map((m) => ({ role: m.role, content: m.content }));
+      const reply = await askReefAI(apiMsgs, SYS, "deepdive");
+      setFollowMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't answer that just now." }]);
+    } catch (e) {
+      if (e.limitReached && onUpgrade) { setFollowMsgs((m) => m.slice(0, -1)); onUpgrade(); setFollowBusy(false); return; }
+      setFollowMsgs((m) => [...m, { role: "assistant", content: "Error: " + (e.message || "connection failed") + " — try again." }]);
+    }
+    setFollowBusy(false);
   };
   return (
     <div className="rb-fadein">
@@ -4269,13 +4295,43 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
                 {card.difficulty && <span className="rb-badge" style={{ background: dc + "22", color: dc, border: `1px solid ${dc}55` }}>{card.difficulty} care</span>}
                 {card.confidence && <span className="rb-badge" style={{ background: "transparent", color: cc, border: `1px solid ${cc}55` }}>{card.confidence} confidence</span>}
               </div>
+              {/* Overview */}
+              {card.overview && <div style={{ fontSize: 13.5, lineHeight: 1.55, color: "#d8eef5", marginBottom: 14 }}>{card.overview}</div>}
+              {/* Spec grid */}
+              {(() => {
+                const specs = [
+                  ["Placement", card.placement], ["Lighting", card.lighting && card.lighting.toLowerCase() !== "n/a" ? card.lighting : null],
+                  ["Flow", card.flow], ["Diet", card.diet], ["Temperament", card.temperament],
+                ].filter(([, v]) => v);
+                return specs.length > 0 ? (
+                  <div className="rb-card" style={{ padding: "4px 12px", marginBottom: 14, background: "var(--bg-2)" }}>
+                    {specs.map(([k, v], i) => (
+                      <div key={k} style={{ display: "flex", gap: 12, padding: "9px 0", borderBottom: i < specs.length - 1 ? "1px solid rgba(255,255,255,.06)" : "none" }}>
+                        <span style={{ fontSize: 12, color: "var(--muted)", minWidth: 92, flex: "none" }}>{k}</span>
+                        <span style={{ fontSize: 13, fontWeight: 500, lineHeight: 1.4 }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : null;
+              })()}
               {/* Care tips */}
               {Array.isArray(card.tips) && card.tips.length > 0 && (
-                <div style={{ marginBottom: card.note ? 12 : 0 }}>
+                <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700, letterSpacing: .3, marginBottom: 8 }}>QUICK CARE</div>
                   {card.tips.map((tip, i) => (
                     <div key={i} style={{ display: "flex", gap: 9, marginBottom: 8, fontSize: 13.5, lineHeight: 1.45 }}>
                       <Check size={15} color="var(--good)" style={{ flex: "none", marginTop: 2 }} /><span>{tip}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {/* Watch for */}
+              {Array.isArray(card.watch) && card.watch.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 700, letterSpacing: .3, marginBottom: 8 }}>WATCH FOR</div>
+                  {card.watch.map((w, i) => (
+                    <div key={i} style={{ display: "flex", gap: 9, marginBottom: 8, fontSize: 13.5, lineHeight: 1.45 }}>
+                      <Bell size={14} color="var(--warn)" style={{ flex: "none", marginTop: 3 }} /><span>{w}</span>
                     </div>
                   ))}
                 </div>
@@ -4309,6 +4365,41 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
           </div>
         );
       })()}
+
+      {/* Follow-up questions about the identified species */}
+      {card && card.common !== "Unclear" && (
+        <div className="rb-card" style={{ padding: 16, marginTop: 14 }}>
+          <div style={{ fontSize: 12, color: "var(--muted)", fontWeight: 700, letterSpacing: .3, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <Bot size={14} color="var(--aqua)" /> ASK ABOUT THIS {card.type ? card.type.toUpperCase() : "SPECIES"}
+          </div>
+          {followMsgs.length > 0 && (
+            <div ref={followScroll} style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 12, maxHeight: 340, overflowY: "auto" }}>
+              {followMsgs.map((m, i) => (
+                <div key={i} className={"rb-ai-msg " + (m.role === "user" ? "u" : "a")}>{m.content}</div>
+              ))}
+              {followBusy && <div className="rb-ai-msg a"><div className="rb-typing"><i /><i /><i /></div></div>}
+            </div>
+          )}
+          {followMsgs.length === 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {[
+                `Is ${card.common} reef-safe?`,
+                card.type === "Coral" ? "How fast does it grow?" : "What tankmates work?",
+                "Will it work in my tank?",
+                "Common problems?",
+              ].map((s, i) => (
+                <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => !followBusy && askFollowUp(s)}>{s}</div>
+              ))}
+            </div>
+          )}
+          <div className="rb-ai-row">
+            <input className="rb-input" placeholder={`Ask about ${card.common}…`} value={followInput}
+              onChange={(e) => setFollowInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && followInput.trim() && !followBusy) askFollowUp(followInput); }} />
+            <button className="rb-btn" disabled={!followInput.trim() || followBusy} onClick={() => askFollowUp(followInput)}><Send size={16} /></button>
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="rb-card" style={{ padding: 16, marginTop: 14, fontSize: 14, lineHeight: 1.55, whiteSpace: "pre-wrap" }}>
