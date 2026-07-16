@@ -2606,7 +2606,7 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following
                 <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55`, flex: "none" }}>{post.tag}</span>
               </div>
               <div className="rb-pbody">{post.body}</div>
-              {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: 170, flexShrink: 0, objectFit: "cover", width: "100%" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+              {post.img && <PostImg src={post.img} />}
               <div className="rb-pacts">
                 <span className={isLiked ? "liked" : ""} onClick={(e) => { e.stopPropagation(); toggleLike(post.id); }}>
                   <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
@@ -2733,7 +2733,7 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
           <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
         </div>
         <div className="rb-pbody">{post.body}</div>
-        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: "auto", maxHeight: "60vh", objectFit: "contain", width: "100%", background: "rgba(3,8,12,.5)" }} onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+        {post.img && <PostImg src={post.img} detail />}
         <div className="rb-pacts" style={{ marginBottom: 16 }}>
           <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
             <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
@@ -3061,6 +3061,27 @@ function SpeciesIcon({ cat, size = 30 }) {
   if (cat === "Invert") return <Shell size={size} />;
   if (cat === "Pest") return <Bell size={size} />;
   return <Waves size={size} />;
+}
+
+/* Post images: /species/{id}.jpg srcs resolve through the species-photo system
+   (bundled file if present, live Wikipedia fallback if the build fetch missed) —
+   so demo-feed photos are self-healing. Other srcs render directly, hiding on error. */
+const NO_ITEM = { id: "__none__", noPhoto: true, g: ["#0b2330", "#05121b"], name: "" };
+function PostImg({ src, detail }) {
+  const m = typeof src === "string" ? src.match(/^\/species\/([A-Za-z0-9_-]+)\.jpg$/) : null;
+  const item = m ? (REEFPEDIA.find((e) => e.id === m[1]) || NO_ITEM) : NO_ITEM;
+  const resolved = useSpeciesPhoto(item);
+  const finalSrc = m ? resolved : src;
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { setFailed(false); }, [finalSrc]);
+  if (!finalSrc || failed) return null;
+  return detail ? (
+    <img className="rb-pimg" src={finalSrc} alt="" onError={() => setFailed(true)}
+      style={{ height: "auto", maxHeight: "60vh", objectFit: "contain", width: "100%", background: "rgba(3,8,12,.5)" }} />
+  ) : (
+    <img className="rb-pimg" src={finalSrc} alt="" onError={() => setFailed(true)}
+      style={{ height: 170, flexShrink: 0, objectFit: "cover", width: "100%" }} />
+  );
 }
 
 function SpeciesPhoto({ item, height, radius = 0 }) {
