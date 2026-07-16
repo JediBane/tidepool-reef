@@ -1636,7 +1636,7 @@ function TidepoolReef() {
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat, uid: state.uid, onMessage: (who, prefill) => { setMsgTo({ ...who, prefill }); setSheet("message"); } }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
-        {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} tanks={state.tanks} addTo={addLivestockTo} />}
+        {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} tanks={state.tanks} addTo={addLivestockTo} tank={state.tank} history={state.history} livestock={state.livestock} />}
         {view === "notifications" && <Notifications uid={session.user.id} />}
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
@@ -4174,7 +4174,7 @@ function FreeTasteBanner({ used, limit, unit, onUpgrade }) {
   );
 }
 
-function ReefID({ profile, onUpgrade, tanks, addTo }) {
+function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) {
   const [addOpen, setAddOpen] = useState(false);
   const [added, setAdded] = useState("");
   const [img, setImg] = useState(null);     // {b64, media, url}
@@ -4187,6 +4187,19 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
   const fileRef = useRef(null);
   const followScroll = useRef(null);
   useEffect(() => { if (followScroll.current) followScroll.current.scrollTop = followScroll.current.scrollHeight; }, [followMsgs, followBusy]);
+
+  // Snapshot of the user's active tank, for compatibility checks.
+  const tankSnapshot = () => {
+    if (!tank) return "";
+    const params = (history && history.length) ? PARAMS.map((p) => {
+      const lv = lastVal(history, p.key);
+      return lv ? `${p.label} ${lv.v}${p.unit}` : null;
+    }).filter(Boolean).join(", ") : "no test data yet";
+    const stock = (livestock || []).filter((l) => (l.status || "alive") === "alive");
+    const stockList = stock.length ? stock.map((l) => `${l.name}${l.type ? " (" + l.type + ")" : ""}`).join(", ") : "no livestock yet";
+    return `Tank "${tank.name}": ${tank.model || "reef tank"}, ${tank.volume} gallons, running since ${tank.since || "recently"}. ` +
+      `Current parameters: ${params}. Current livestock: ${stockList}.`;
+  };
 
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
@@ -4240,8 +4253,10 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
     const idContext = card
       ? `The user just identified: ${card.common}${card.scientific ? " (" + card.scientific + ")" : ""}, a ${card.type}. Care summary — difficulty: ${card.difficulty}; placement: ${card.placement || "?"}; lighting: ${card.lighting || "?"}; flow: ${card.flow || "?"}; diet: ${card.diet || "?"}; temperament: ${card.temperament || "?"}.`
       : "The user is asking about a reef species they just tried to identify.";
+    const tankCtx = tankSnapshot();
     const SYS = "You are Tidepool Reef ID, an expert saltwater aquarium advisor. " + idContext +
-      " Answer the user's follow-up question about this species specifically. Be concise, practical, and friendly. 2-4 sentences unless more detail is clearly needed.";
+      (tankCtx ? " Here is the user's tank you should evaluate compatibility against — " + tankCtx : "") +
+      " Answer the user's follow-up question about this species specifically. When compatibility with their tank is relevant, reference their actual parameters, tank size, and existing livestock (aggression, bioload, adult size vs tank volume, parameter fit). Be concise, practical, and honest — if it's a bad fit, say so and why. 2-4 sentences unless more detail is needed.";
     try {
       const apiMsgs = hist.map((m) => ({ role: m.role, content: m.content }));
       const reply = await askReefAI(apiMsgs, SYS, "deepdive");
@@ -4385,10 +4400,13 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
           )}
           {followMsgs.length === 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+              {tank && <div className="rb-chip" style={{ fontSize: 12, borderColor: "var(--aqua)", color: "var(--aqua)" }}
+                onClick={() => !followBusy && askFollowUp(`Will this ${card.common} thrive in my tank "${tank.name}"? Check it against my parameters, tank size, and current livestock — flag any compatibility, aggression, bioload, or adult-size concerns.`)}>
+                ✓ Will it work in {tank.name}?
+              </div>}
               {[
                 `Is ${card.common} reef-safe?`,
                 card.type === "Coral" ? "How fast does it grow?" : "What tankmates work?",
-                "Will it work in my tank?",
                 "Common problems?",
               ].map((s, i) => (
                 <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => !followBusy && askFollowUp(s)}>{s}</div>
