@@ -3125,33 +3125,104 @@ function fishFamily(item) {
   return "More Reef Fish";
 }
 
+/* Coral genus groupings per tab — same keyword approach, so new corals self-file. */
+const CORAL_GROUPS = {
+  SPS: [
+    ["Acropora", /acropora|staghorn|table |slimer/i],
+    ["Montipora", /montipora/i],
+    ["Birdsnest & Stylo", /birdsnest|seriatopora|stylophora/i],
+    ["Pocillopora", /pocillopora/i],
+    ["Encrusting SPS", /porites|pavona|psammocora|leptoseris|cyphastrea|hydnophora/i],
+  ],
+  LPS: [
+    ["Euphyllia (Hammer/Torch/Frog)", /euphyllia|hammer|torch|frogspawn/i],
+    ["Brains", /brain|trachyphyllia|lobophyllia|symphyllia|favia|platygyra|diploastrea|open brain|scoly|homophyllia|cynarina/i],
+    ["Acans & Micromussa", /acan|acanthastrea|micromussa|blastomussa/i],
+    ["Chalices & Favites", /chalice|echinophyllia|favites|war coral|leptastrea|cyphastrea|pectinia/i],
+    ["Plates & Fungia", /plate |fungia|tongue|herpolitha/i],
+    ["Bubble, Elegance & Fleshy", /bubble|plerogyra|physogyra|elegance|catalaphyllia|meat coral|acanthophyllia|fox coral/i],
+    ["Flowerpot & Star", /goniopora|alveopora|galaxea|duncan/i],
+    ["Non-Photosynthetic", /sun coral|tubastraea|dendrophyllia/i],
+    ["Candy Cane & Scroll", /candy cane|caulastraea|scroll|turbinaria/i],
+  ],
+  Soft: [
+    ["Leathers", /leather|sarcophyton|sinularia|lobophytum|cladiella|capnella|colt|kenya|litophyton|tree coral/i],
+    ["Mushrooms", /mushroom|discosoma|rhodactis|ricordea|bounce|jawbreaker/i],
+    ["Zoas & Palys", /zoanthid|palythoa|parazoanthus|yellow polyp/i],
+    ["Pulsing & Polyps", /xenia|anthelia|clove|pipe organ|tubipora|sympodium|star polyp|briareum/i],
+    ["Gorgonians", /gorgonian|antillogorgia/i],
+  ],
+};
+function coralGroup(item, cat) {
+  const groups = CORAL_GROUPS[cat]; if (!groups) return null;
+  const hay = item.name + " " + item.sci;
+  for (const [g, re] of groups) if (re.test(hay)) return g;
+  return "Other " + cat;
+}
+// Representative species id per group (hand-picked so tiles look intentional).
+const GROUP_ICON = {
+  "Clownfish": "f40", "Tangs & Surgeonfish": "f6", "Wrasses": "f48", "Gobies, Blennies & Dragonets": "f44",
+  "Anthias, Basslets & Dottybacks": "f52", "Angels & Butterflies": "f42", "Cardinals, Damsels & Chromis": "f73", "Firefish & Dartfish": "f54",
+  "Acropora": "s2", "Montipora": "s4", "Birdsnest & Stylo": "s6", "Pocillopora": "s8", "Encrusting SPS": "s18",
+  "Euphyllia (Hammer/Torch/Frog)": "l2", "Brains": "l10", "Acans & Micromussa": "l5", "Chalices & Favites": "l8",
+  "Plates & Fungia": "l12", "Bubble, Elegance & Fleshy": "l14", "Flowerpot & Star": "l16", "Non-Photosynthetic": "l15", "Candy Cane & Scroll": "l6",
+  "Leathers": "o1", "Mushrooms": "o10", "Zoas & Palys": "o6", "Pulsing & Polyps": "o5", "Gorgonians": "o20",
+};
+
 function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
   const [q, setQ] = useState("");
   const [diffFilter, setDiffFilter] = useState("All");
+  const [group, setGroup] = useState(null);   // selected family/genus tile
   const isZoa = libCat === "Zoa";
   const query = q.trim().toLowerCase();
+  // Which tabs use the tile landing.
+  const grouped = libCat === "Fish" || libCat === "SPS" || libCat === "LPS" || libCat === "Soft";
+  const groupOf = (l) => libCat === "Fish" ? fishFamily(l) : coralGroup(l, libCat);
+  const groupOrder = libCat === "Fish"
+    ? [...FISH_FAMILIES.map(([f]) => f), "More Reef Fish"]
+    : (CORAL_GROUPS[libCat] ? [...CORAL_GROUPS[libCat].map(([g]) => g), "Other " + libCat] : []);
+
   const shown = REEFPEDIA.filter((l) =>
     (libCat === "All" || l.cat === libCat) &&
     (diffFilter === "All" || l.diff === diffFilter) &&
+    (!group || groupOf(l) === group) &&
     (!query || l.name.toLowerCase().includes(query) || l.sci.toLowerCase().includes(query) || l.blurb.toLowerCase().includes(query)));
+
+  const switchCat = (c) => { setLibCat(c); setGroup(null); setDiffFilter("All"); };
+  // Show tile landing: a grouped tab, no search, no group drilled into.
+  const showTiles = grouped && !query && !group;
+
   return (
     <div className="rb-fadein">
       {!isZoa && (
         <div className="rb-card" style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", marginTop: 4 }}>
           <Search size={17} color="var(--muted)" />
           <input className="rb-input" style={{ border: "none", padding: 0, background: "transparent" }}
-            placeholder={`Search ${REEFPEDIA.length} species, corals & pests…`} value={q} onChange={(e) => setQ(e.target.value)} />
+            placeholder={`Search ${REEFPEDIA.length} species, corals & pests…`} value={q} onChange={(e) => { setQ(e.target.value); }} />
         </div>
       )}
       <div className="rb-tabs" style={{ marginTop: 14 }}>
         {[...REEFPEDIA_CATS, "Zoa"].map((c) => (
-          <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => setLibCat(c)}>
+          <div key={c} className={"rb-chip" + (libCat === c ? " on" : "")} onClick={() => switchCat(c)}>
             {c === "Pest" ? "Pests & Disease" : c === "Soft" ? "Soft Coral" : c === "Zoa" ? "🪸 Zoa Morphs" : c}
           </div>
         ))}
       </div>
-      {!isZoa && libCat !== "Pest" && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 2px 0", flexWrap: "wrap" }}>
+
+      {isZoa && <ZoaGuide onAddToTank={onAddToTank} />}
+
+      {/* Back chip when drilled into a group */}
+      {!isZoa && group && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 2px 0" }}>
+          <div className="rb-chip" onClick={() => setGroup(null)}><ChevronLeft size={14} style={{ verticalAlign: -2 }} /> All {libCat === "Fish" ? "families" : "types"}</div>
+          <span style={{ fontFamily: "Bricolage Grotesque", fontWeight: 700, fontSize: 16 }}>{group}</span>
+          <span style={{ fontSize: 12, color: "var(--muted-2)" }}>{shown.length}</span>
+        </div>
+      )}
+
+      {/* Care-level filter — hidden on the tile landing and on Pest */}
+      {!isZoa && !showTiles && libCat !== "Pest" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 2px 0", flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: "var(--muted)" }}>Care level:</span>
           {["All", "Easy", "Medium", "Hard", "Expert"].map((d) => (
             <div key={d} className={"rb-chip" + (diffFilter === d ? " on" : "")} style={{ fontSize: 11, padding: "5px 11px" }}
@@ -3162,26 +3233,41 @@ function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
           <span style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: "auto" }}>{shown.length} shown</span>
         </div>
       )}
-      {isZoa && <ZoaGuide onAddToTank={onAddToTank} />}
-      {!isZoa && shown.length === 0 && <div className="rb-card rb-empty">Nothing matches{q ? ` “${q}”` : " these filters"}. Try a common name, a genus, or a symptom{diffFilter !== "All" ? " — or clear the care-level filter" : ""}.</div>}
-      {!isZoa && libCat === "Fish" && !query ? (
-        // Field-guide chapters: group fish by family. Search switches back to a flat list.
-        [...FISH_FAMILIES.map(([fam]) => fam), "More Reef Fish"].map((fam) => {
-          const members = shown.filter((l) => fishFamily(l) === fam);
+
+      {/* TILE LANDING */}
+      {!isZoa && showTiles && (() => {
+        const tiles = groupOrder.map((g) => {
+          const members = REEFPEDIA.filter((l) => l.cat === libCat && groupOf(l) === g);
           if (!members.length) return null;
-          return (
-            <div key={fam}>
-              <div className="rb-h2" style={{ marginTop: 18 }}>{fam} <small>{members.length}</small></div>
-              <div className="rb-mgrid">
-                {members.map((l) => <LibCard key={l.id} l={l} counts={counts} openItem={openItem} />)}
+          const iconItem = REEFPEDIA.find((l) => l.id === GROUP_ICON[g]) || members[0];
+          return { g, count: members.length, iconItem };
+        }).filter(Boolean);
+        return (
+          <div className="rb-mgrid" style={{ marginTop: 16 }}>
+            {tiles.map(({ g, count, iconItem }) => (
+              <div key={g} className="rb-card rb-mcard" style={{ cursor: "pointer" }} onClick={() => setGroup(g)}>
+                <div style={{ position: "relative" }}>
+                  <SpeciesPhoto item={iconItem} height={128} />
+                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg,transparent 45%,rgba(3,8,12,.9))" }} />
+                  <div style={{ position: "absolute", left: 12, right: 12, bottom: 10 }}>
+                    <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 15, lineHeight: 1.15 }}>{g}</div>
+                    <div style={{ fontSize: 11.5, color: "var(--aqua)", marginTop: 2 }}>{count} species</div>
+                  </div>
+                </div>
               </div>
-            </div>
-          );
-        })
-      ) : !isZoa && (
-        <div className="rb-mgrid">
-          {shown.map((l) => <LibCard key={l.id} l={l} counts={counts} openItem={openItem} />)}
-        </div>
+            ))}
+          </div>
+        );
+      })()}
+
+      {/* SPECIES GRID — flat (All/Invert/Pest, search, or a drilled-in group) */}
+      {!isZoa && !showTiles && (
+        <>
+          {shown.length === 0 && <div className="rb-card rb-empty" style={{ marginTop: 14 }}>Nothing matches{q ? ` “${q}”` : " these filters"}. Try a common name, a genus, or a symptom{diffFilter !== "All" ? " — or clear the care-level filter" : ""}.</div>}
+          <div className="rb-mgrid" style={{ marginTop: 14 }}>
+            {shown.map((l) => <LibCard key={l.id} l={l} counts={counts} openItem={openItem} />)}
+          </div>
+        </>
       )}
     </div>
   );
