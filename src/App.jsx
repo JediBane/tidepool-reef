@@ -1199,25 +1199,34 @@ function TidepoolReef() {
     tick();
   }, [session && session.user && session.user.id]);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
-  // Client-side check is for UX ONLY (show the paywall early). The Netlify function
-  // enforces the real limit server-side and increments the counter — this never can.
+  // Client-side counting: increments the free-tier counter via the use_ai RPC so usage
+  // deducts immediately. When SUPABASE_SERVICE_KEY is set, the server gate becomes the
+  // authoritative counter and the client defers (serverCounts flag) to avoid double-counting.
   AI_GATE.check = async (kind) => {
     const p = state && state.profile;
     if (!p) return false;
     if (p.plan === "pro") return true;
-    const used = kind === "reefid" ? (p.reefid_used || 0) : (p.deepdive_used || 0);
-    const limit = kind === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
+    const k = kind === "reefid" ? "reefid" : "deepdive";
+    const field = k === "reefid" ? "reefid_used" : "deepdive_used";
+    const used = p[field] || 0;
+    const limit = k === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
     if (used >= limit) { setUpgradeOpen(true); return false; }
-    // Count this use client-side ONLY while the server gate isn't the active counter
-    // (i.e. before SUPABASE_SERVICE_KEY is set). Once the server counts, we defer to it
-    // and skip here to avoid double-counting. use_ai is a security-definer RPC scoped to
-    // auth.uid(), so a user can only ever bump their own counter.
+    // Count this use client-side unless the server gate is the active counter.
     if (!AI_GATE_STATE.serverCounts) {
-      const { data: n, error } = await supabase.rpc("use_ai", { kind });
-      if (!error && typeof n === "number") {
-        setState((s) => s ? { ...s, profile: { ...s.profile, [kind === "reefid" ? "reefid_used" : "deepdive_used"]: n } } : s);
-      } else if (error) {
-        console.error("use_ai increment failed:", error.message);
+      try {
+        const { data: n, error } = await supabase.rpc("use_ai", { kind: k });
+        if (error) {
+          console.error("use_ai increment failed:", error.message);
+          // Fallback: optimistic local bump so the UI still counts down even if the RPC hiccups.
+          AI_GATE_STATE.lastCount = used + 1;
+          setState((s) => s ? { ...s, profile: { ...s.profile, [field]: used + 1 } } : s);
+        } else {
+          AI_GATE_STATE.lastCount = (typeof n === "number") ? n : used + 1;
+          setState((s) => s ? { ...s, profile: { ...s.profile, [field]: AI_GATE_STATE.lastCount } } : s);
+        }
+      } catch (e) {
+        console.error("use_ai threw:", e);
+        setState((s) => s ? { ...s, profile: { ...s.profile, [field]: used + 1 } } : s);
       }
     }
     return true;
@@ -1225,7 +1234,14 @@ function TidepoolReef() {
   AI_GATE.sync = async () => {
     if (!session || !session.user) return;
     const { data } = await supabase.from("profiles").select("reefid_used, deepdive_used, plan").eq("id", session.user.id).single();
-    if (data) setState((s) => s ? { ...s, profile: { ...s.profile, ...data } } : s);
+    if (data) setState((s) => {
+      if (!s) return s;
+      // Never let a stale read lower a counter below what we just counted locally.
+      const merged = { ...s.profile, ...data };
+      if (typeof s.profile.reefid_used === "number" && data.reefid_used < s.profile.reefid_used) merged.reefid_used = s.profile.reefid_used;
+      if (typeof s.profile.deepdive_used === "number" && data.deepdive_used < s.profile.deepdive_used) merged.deepdive_used = s.profile.deepdive_used;
+      return { ...s, profile: merged };
+    });
   };
   useEffect(() => {
     const el = document.getElementById("rb-ptr");
