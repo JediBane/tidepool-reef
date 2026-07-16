@@ -4533,10 +4533,13 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
       : question;
     const history = [...msgs, { role: "user", content: display || question, img: attach ? attach.url : null, api }];
     setMsgs(history); setInput(""); setBusy(true);
-    // Persist the user turn (create the thread on first message).
-    const tid = await ensureThread(display || question);
-    if (tid) persist(tid, "user", display || question, attach ? attach.url : null);
     try {
+      // Gate FIRST — don't create/persist a thread for a message that gets paywalled.
+      if (!(await gateAI("deepdive"))) { setBusy(false); return; }
+      // Persist the user turn (create the thread on first message). Photos are kept
+      // in-session only — data URLs are far too large to store per-message in the DB.
+      const tid = await ensureThread(display || question);
+      if (tid) persist(tid, "user", (attach ? "📷 " : "") + (display || question), null);
       // Token control: only the 2 most recent photos travel to the API; older ones become a note.
       let imgsSeen = 0;
       const apiMsgs = [...history].reverse().map((m) => {
@@ -4547,7 +4550,6 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
         }
         return { role: m.role, content: c };
       }).reverse();
-      if (!(await gateAI("deepdive"))) { setBusy(false); return; }
       const reply = await askReefAI(apiMsgs, SYS, "deepdive");
       const answer = reply || "Hmm, I couldn't generate a response just now.";
       setMsgs((m) => [...m, { role: "assistant", content: answer }]);
