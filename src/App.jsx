@@ -220,7 +220,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;outline:none;}
 
 /* AI */
-.rb-ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
+.rb-ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;flex:1 1 auto;min-height:180px;overflow-y:auto;}
+.rb-ai-wrap{display:flex;flex-direction:column;min-height:calc(100dvh - 210px);}
 .rb-ai-msg{padding:11px 14px;border-radius:15px;font-size:13.5px;line-height:1.5;max-width:88%;white-space:pre-wrap;}
 .rb-ai-msg.u{align-self:flex-end;background:linear-gradient(120deg,var(--aqua-d),var(--aqua));color:var(--bg-0);font-weight:500;}
 .rb-ai-msg.a{align-self:flex-start;background:rgba(255,255,255,.05);border:1px solid var(--brd);}
@@ -4330,6 +4331,27 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
     send(`Diagnose my reef tank. Tank: ${t.model}, ${t.volume} gallons, set up ${t.since}. Current parameters — ${snapshot()}. Livestock: ${live}. Give a quick health read, flag what's drifting, and 2-3 concrete next actions.`,
       "🔍 Diagnose my tank using current parameters");
   };
+  // Context-aware suggestions built from THIS tank's flags, livestock, and stage.
+  const suggestions = useMemo(() => {
+    const out = [];
+    const active = state.livestock.filter((l) => (l.status || "alive") === "alive");
+    // 1) Anything drifting → a targeted fix question
+    for (const p of issues.slice(0, 2)) {
+      const lv = lastVal(state.history, p.key);
+      if (lv) out.push({ label: `Why is my ${p.label.toLowerCase()} ${lv.v > p.ideal[1] ? "high" : "low"}?`, q: `My ${p.label} is ${lv.v}${p.unit} (target ${p.ideal[0]}-${p.ideal[1]}). Why might that be, and how do I safely correct it for this tank?` });
+    }
+    // 2) A question about a specific animal they keep
+    if (active.length) {
+      const pick = active[Math.floor(Math.random() * active.length)];
+      out.push({ label: `Care tips for my ${pick.name}`, q: `Give me care tips for keeping ${pick.name} healthy in this specific tank, based on my current parameters.` });
+    }
+    // 3) Stage-appropriate / stocking
+    if (active.length < 3) out.push({ label: "What should I add next?", q: "Based on my tank size, parameters, and current livestock, what would be a good next addition — and what should I avoid?" });
+    else out.push({ label: "Is my tank ready for SPS?", q: "Looking at my parameters and stability, is my tank ready for SPS corals? What would you want to see first?" });
+    // 4) Always-useful maintenance
+    out.push({ label: "What should I test next?", q: "Given my recent readings, which parameters should I prioritise testing next and how often?" });
+    return out.slice(0, 4);
+  }, [state.tankId, state.livestock, state.history, issues]);
   return (
     <div className="rb-fadein">
       {state.profile.plan !== "pro" && (
@@ -4341,10 +4363,11 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
           <Bot size={14} color="var(--aqua)" /> DeepDive is looking at <b style={{ color: "var(--text)" }}>{t.name}</b> — switch tanks above to ask about another.
         </div>
       )}
+      <div className="rb-ai-wrap">
       <div className="rb-ai-msgs" ref={scroller}>
         {msgs.length === 0 && (
           <div className="rb-empty"><Bot size={28} color="var(--aqua)" style={{ opacity: .85 }} />
-            <div style={{ marginTop: 10 }}>Ask anything about your reef, or run a full diagnosis from your latest test results.</div></div>
+            <div style={{ marginTop: 10 }}>Ask anything about <b style={{ color: "var(--text)" }}>{t.name}</b> — DeepDive can see your parameters and livestock.</div></div>
         )}
         {msgs.map((m, i) => (
           <div key={i} className={"rb-ai-msg " + (m.role === "user" ? "u" : "a")}>
@@ -4355,9 +4378,17 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
         {busy && <div className="rb-ai-msg a"><div className="rb-typing"><i /><i /><i /></div></div>}
       </div>
       {msgs.length === 0 ? (
-        <button className="rb-btn violet" style={{ width: "100%", marginBottom: 12, padding: 13 }} onClick={diagnose} disabled={busy}>
-          <TrendingUp size={16} /> Diagnose {t.name}{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
-        </button>
+        <>
+          <button className="rb-btn violet" style={{ width: "100%", marginBottom: 10, padding: 13 }} onClick={diagnose} disabled={busy}>
+            <TrendingUp size={16} /> Diagnose {t.name}{issues.length ? ` · ${issues.length} flag${issues.length > 1 ? "s" : ""}` : ""}
+          </button>
+          <div style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 2px 8px" }}>Or ask about your tank:</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {suggestions.map((s, i) => (
+              <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => !busy && send(s.q, s.label)}>{s.label}</div>
+            ))}
+          </div>
+        </>
       ) : (
         <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
           <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => !busy && diagnose()}>🔍 Re-diagnose {t.name}</div>
@@ -4383,6 +4414,7 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (input.trim() || photo) && !busy) send(input.trim()); }} />
         <button className="rb-btn" disabled={(!input.trim() && !photo) || busy} onClick={() => send(input.trim())}><Send size={16} /></button>
+      </div>
       </div>
     </div>
   );
