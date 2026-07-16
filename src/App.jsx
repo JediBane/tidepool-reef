@@ -3049,10 +3049,12 @@ const CAT_COLOR = { Fish: "#ff7a5c", SPS: "#2ee6c8", LPS: "#3fe3ff", Soft: "#b06
 
 function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
   const [q, setQ] = useState("");
+  const [diffFilter, setDiffFilter] = useState("All");
   const isZoa = libCat === "Zoa";
   const query = q.trim().toLowerCase();
   const shown = REEFPEDIA.filter((l) =>
     (libCat === "All" || l.cat === libCat) &&
+    (diffFilter === "All" || l.diff === diffFilter) &&
     (!query || l.name.toLowerCase().includes(query) || l.sci.toLowerCase().includes(query) || l.blurb.toLowerCase().includes(query)));
   return (
     <div className="rb-fadein">
@@ -3070,8 +3072,20 @@ function Library({ libCat, setLibCat, openItem, counts, onAddToTank }) {
           </div>
         ))}
       </div>
+      {!isZoa && libCat !== "Pest" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 2px 0", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>Care level:</span>
+          {["All", "Easy", "Medium", "Hard", "Expert"].map((d) => (
+            <div key={d} className={"rb-chip" + (diffFilter === d ? " on" : "")} style={{ fontSize: 11, padding: "5px 11px" }}
+              onClick={() => setDiffFilter(d)}>
+              {d !== "All" && <span className="rb-sdot" style={{ display: "inline-block", width: 6, height: 6, marginRight: 5, verticalAlign: 1, background: diffColor[d] || "var(--muted)" }} />}{d}
+            </div>
+          ))}
+          <span style={{ fontSize: 11, color: "var(--muted-2)", marginLeft: "auto" }}>{shown.length} shown</span>
+        </div>
+      )}
       {isZoa && <ZoaGuide onAddToTank={onAddToTank} />}
-      {!isZoa && shown.length === 0 && <div className="rb-card rb-empty">Nothing matches “{q}”. Try a common name, a genus, or a symptom.</div>}
+      {!isZoa && shown.length === 0 && <div className="rb-card rb-empty">Nothing matches{q ? ` “${q}”` : " these filters"}. Try a common name, a genus, or a symptom{diffFilter !== "All" ? " — or clear the care-level filter" : ""}.</div>}
       {!isZoa && <div className="rb-mgrid">
         {shown.map((l) => (
           <div key={l.id} className="rb-card rb-mcard" onClick={() => openItem(l)}>
