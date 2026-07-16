@@ -2970,6 +2970,7 @@ function loadCache() {
 function saveCache(c) { try { localStorage.setItem("tr:pics", JSON.stringify(c)); } catch (e) {} }
 
 async function resolveRuntimePhoto(item) {
+  if (item.noPhoto) return null;   // designer morphs: trade names with no free photos — render the gradient
   const disk = loadCache();
   if (disk[item.id] !== undefined) return disk[item.id];
   const tryTitle = async (title) => {

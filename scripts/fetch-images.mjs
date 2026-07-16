@@ -93,6 +93,7 @@ async function fileInfo(fileTitle) {
 }
 
 async function resolve(entry) {
+  if (entry.noPhoto) return null;   // designer morphs — no free photos exist; app renders gradient
   const candidates = [entry.wiki];
   try {
     const direct = await leadFileTitle(entry.wiki);
