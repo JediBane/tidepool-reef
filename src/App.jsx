@@ -4261,7 +4261,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
         <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 14 }}>
           Point your camera at any coral, fish, or invert. Reef ID names the species, rates its care difficulty, and gives you quick care tips — then adds it to your tank in a tap.
         </div>
-        <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onFile} />
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
         {img
           ? <img className="rb-preview" src={img.url} alt="to identify" />
           : <div className="rb-drop" onClick={() => fileRef.current && fileRef.current.click()}>
