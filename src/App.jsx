@@ -1365,8 +1365,10 @@ function TidepoolReef() {
   const addLivestock = async (kind, name, note, speciesId, detail = {}) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
     const prev = state.livestock;
+    const targetTank = detail.tankId || state.tankId;
+    const isActive = targetTank === state.tankId;
     const row = {
-      tank_id: state.tankId, kind, name, note: note || null, color: c, species_id: speciesId || null,
+      tank_id: targetTank, kind, name, note: note || null, color: c, species_id: speciesId || null,
       price_usd: detail.price != null && detail.price !== "" ? Number(detail.price) : null,
       source: detail.source || null,
       size_note: detail.size || null,
@@ -1374,7 +1376,7 @@ function TidepoolReef() {
       photo_url: detail.photoUrl || null,
     };
     const tmpId = "tmp" + Date.now();
-    setState((s) => ({ ...s, livestock: [...s.livestock, {
+    if (isActive) setState((s) => ({ ...s, livestock: [...s.livestock, {
       id: tmpId, type: kind, name, note: note || "", c, species_id: speciesId || null,
       price: row.price_usd, source: detail.source || "", size: detail.size || "", acquiredAt: detail.acquiredAt || null,
       photo: detail.photoUrl || null, status: "alive",
@@ -1382,14 +1384,16 @@ function TidepoolReef() {
     const { data, error } = await supabase.from("livestock").insert(row).select().single();
     if (error) {
       console.error("addLivestock failed:", error.message);
-      setState((s) => ({ ...s, livestock: prev }));
+      if (isActive) setState((s) => ({ ...s, livestock: prev }));
       alert("Couldn't add that livestock — try again.");
       return null;
     }
     // swap tmp id for the real one
-    setState((s) => ({ ...s, livestock: s.livestock.map((l) => l.id === tmpId ? { ...l, id: data.id } : l) }));
-    if (speciesId) setState((s) => ({ ...s, speciesCounts: { ...s.speciesCounts, [speciesId]: (s.speciesCounts[speciesId] || 0) + (prev.some((l) => l.species_id === speciesId) ? 0 : 1) } }));
-    // Auto-journal entry — detailed
+    if (isActive) setState((s) => ({ ...s, livestock: s.livestock.map((l) => l.id === tmpId ? { ...l, id: data.id } : l) }));
+    // Library keeper counter — refresh authoritatively so an add to ANY tank is reflected.
+    const counts = await fetchSpeciesCounts();
+    setState((s) => ({ ...s, speciesCounts: counts }));
+    // Auto-journal entry — detailed (to the target tank's log)
     const bits = [];
     if (row.price_usd != null) bits.push(`$${row.price_usd}`);
     if (detail.source) bits.push(`from ${detail.source}`);
@@ -1397,8 +1401,8 @@ function TidepoolReef() {
     const acq = detail.acquiredAt ? new Date(detail.acquiredAt + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : null;
     if (acq) bits.push(`acquired ${acq}`);
     const journalNote = `Added ${name} (${kind})${bits.length ? " — " + bits.join(", ") : ""}.${note ? " Note: " + note : ""}`;
-    await supabase.from("tank_log").insert({ tank_id: state.tankId, entry_type: "Addition", note: journalNote });
-    setState((s) => ({ ...s, log: [{ id: "tmp" + Date.now(), date: Date.now(), type: "Addition", note: journalNote }, ...s.log] }));
+    await supabase.from("tank_log").insert({ tank_id: targetTank, entry_type: "Addition", note: journalNote });
+    if (isActive) setState((s) => ({ ...s, log: [{ id: "tmp" + Date.now(), date: Date.now(), type: "Addition", note: journalNote }, ...s.log] }));
     return data.id;
   };
   const endLivestock = async (id, reason, endReason) => {
@@ -1719,7 +1723,18 @@ function TidepoolReef() {
       {sheet === "log" && <LogSheet latest={latest} history={state.history} onClose={() => setSheet(null)} onSave={saveLog} />}
       {sheet === "sell" && <SellSheet onClose={() => setSheet(null)} onSave={addListing} />}
       {addItem && (
-        <AddToTankSheet item={addItem} tanks={state.tanks} onClose={() => setAddItem(null)} onAdd={addLivestockTo} />
+        <AddLivestockSheet
+          uid={state.uid}
+          tanks={state.tanks}
+          activeTankId={state.tankId}
+          prefill={{
+            name: addItem.name,
+            kind: addItem.kind || (addItem.cat === "Fish" ? "Fish" : addItem.cat === "Invert" ? "Invert" : "Coral"),
+            species: addItem.id && !String(addItem.id).startsWith("zoa:") ? addItem : null,
+          }}
+          onClose={() => setAddItem(null)}
+          onAdd={addLivestock}
+        />
       )}
       {sheet === "libDetail" && libItem && (
         <LibDetail item={libItem} uid={state.uid} count={state.speciesCounts[libItem.id] || 0}
@@ -4184,10 +4199,11 @@ function Tracker({ state, latest, sel, setSel, addLivestock, endLivestock, hideL
 
 const fmtAcq = (d) => { try { return new Date(d + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return d; } };
 
-function AddLivestockSheet({ uid, onClose, onAdd }) {
-  const [kind, setKind] = useState("Coral");
-  const [name, setName] = useState("");
-  const [pick, setPick] = useState(null);
+function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }) {
+  const pf = prefill || {};
+  const [kind, setKind] = useState(pf.kind || "Coral");
+  const [name, setName] = useState(pf.name || "");
+  const [pick, setPick] = useState(pf.species || null);   // {id, name, ...} linked Reefpedia entry
   const [price, setPrice] = useState("");
   const [source, setSource] = useState("");
   const [size, setSize] = useState("");
@@ -4195,7 +4211,9 @@ function AddLivestockSheet({ uid, onClose, onAdd }) {
   const [note, setNote] = useState("");
   const [photo, setPhoto] = useState(null);   // {url, file}
   const [busy, setBusy] = useState(false);
+  const [tankId, setTankId] = useState(activeTankId || (tanks && tanks[0] && tanks[0].id) || null);
   const photoRef = useRef(null);
+  const showTankPicker = tanks && tanks.length > 1;
   const KIND_CATS = { Coral: ["SPS", "LPS", "Soft"], Fish: ["Fish"], Invert: ["Invert"] };
   const q = name.trim().toLowerCase();
   const matches = q.length < 2 || pick ? [] : REEFPEDIA
@@ -4207,7 +4225,7 @@ function AddLivestockSheet({ uid, onClose, onAdd }) {
     let photoUrl = null;
     if (photo) { photoUrl = await uploadPhoto(photo.file, uid); }
     await onAdd(kind, name.trim(), note.trim() || null, pick && pick.id, {
-      price, source: source.trim(), size: size.trim(), acquiredAt, photoUrl,
+      price, source: source.trim(), size: size.trim(), acquiredAt, photoUrl, tankId,
     });
     setBusy(false); onClose();
   };
@@ -4222,6 +4240,14 @@ function AddLivestockSheet({ uid, onClose, onAdd }) {
             {["Coral", "Fish", "Invert"].map((k) => <div key={k} className={"rb-chip" + (kind === k ? " on" : "")} onClick={() => { setKind(k); setPick(null); }}>{k}</div>)}
           </div>
         </div>
+
+        {showTankPicker && (
+          <div className="rb-field"><label>Add to which tank?</label>
+            <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+              {tanks.map((t) => <div key={t.id} className={"rb-chip" + (tankId === t.id ? " on" : "")} onClick={() => setTankId(t.id)}>{t.name} <span style={{ opacity: .6, fontSize: 11 }}>· {t.volume}g</span></div>)}
+            </div>
+          </div>
+        )}
 
         <div className="rb-field"><label>Name</label>
           <input className="rb-input" placeholder={kind === "Fish" ? "e.g. Royal Gramma" : kind === "Invert" ? "e.g. Cleaner Shrimp" : "e.g. Gold Torch"}
