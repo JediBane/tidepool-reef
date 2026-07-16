@@ -220,7 +220,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;outline:none;}
 
 /* AI */
-.rb-ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;flex:1 1 auto;min-height:180px;overflow-y:auto;}
+.rb-ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;overflow-y:auto;}
+.rb-ai-msgs.grow{flex:1 1 auto;min-height:180px;}
+.rb-ai-msgs.empty{flex:0 0 auto;min-height:0;}
+.rb-ai-wrap.compact{min-height:0;}
 .rb-ai-wrap{display:flex;flex-direction:column;min-height:calc(100dvh - 210px);}
 .rb-ai-msg{padding:11px 14px;border-radius:15px;font-size:13.5px;line-height:1.5;max-width:88%;white-space:pre-wrap;}
 .rb-ai-msg.u{align-self:flex-end;background:linear-gradient(120deg,var(--aqua-d),var(--aqua));color:var(--bg-0);font-weight:500;}
@@ -4578,8 +4581,8 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
           <Bot size={14} color="var(--aqua)" /> DeepDive is looking at <b style={{ color: "var(--text)" }}>{t.name}</b> — switch tanks above to ask about another.
         </div>
       )}
-      <div className="rb-ai-wrap">
-      <div className="rb-ai-msgs" ref={scroller}>
+      <div className={"rb-ai-wrap" + (msgs.length ? "" : " compact")}>
+      <div className={"rb-ai-msgs" + (msgs.length ? " grow" : " empty")} ref={scroller}>
         {msgs.length === 0 && (
           <div className="rb-empty"><Bot size={28} color="var(--aqua)" style={{ opacity: .85 }} />
             <div style={{ marginTop: 10 }}>Ask anything about <b style={{ color: "var(--text)" }}>{t.name}</b> — DeepDive can see your parameters and livestock.</div></div>
