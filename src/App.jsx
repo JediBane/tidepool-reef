@@ -40,7 +40,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-root:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.5;mix-blend-mode:overlay;z-index:0;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");}
 .rb-shell{max-width:480px;margin:0 auto;position:relative;z-index:1;padding:0 16px calc(110px + env(safe-area-inset-bottom,0px));}
-.rb-fadein{animation:rbUp .5s cubic-bezier(.2,.7,.2,1) forwards;}
+.rb-fadein{animation:rbFade .45s cubic-bezier(.2,.7,.2,1);}
+/* rbUp retired: its translateY made animated views the containing block for position:fixed
+   children — iOS Low Power Mode can freeze the animation mid-transform, permanently trapping
+   and clipping modal overlays inside the view (the "black box" bug). Opacity-only is safe. */
 @keyframes rbUp{from{opacity:0;transform:translateY(14px)}99%{transform:translateY(0)}to{opacity:1;transform:none}}
 
 .rb-top{display:flex;align-items:center;gap:12px;padding:calc(18px + env(safe-area-inset-top,0px)) 2px 14px;position:sticky;top:0;z-index:30;}
