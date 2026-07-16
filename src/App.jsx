@@ -280,7 +280,8 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   .rb-hscroll{padding:0 24px 6px;margin:0 -24px;}
   .rb-postgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
   .rb-postgrid .rb-post{margin-bottom:0;}
-  .rb-overlay{align-items:center;padding:24px;}
+  .rb-overlay{align-items:flex-start;padding:24px;overflow-y:auto;}
+  .rb-overlay > .rb-sheet{margin:auto;}
 
   /* Landscape tablets + desktops: use the horizontal space so the info fits without scrolling. */
   @media (orientation: landscape) and (min-width: 900px) {
@@ -294,7 +295,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
     .rb-split-body::-webkit-scrollbar{width:6px;}
     .rb-split-body::-webkit-scrollbar-thumb{background:var(--brd-2);border-radius:3px;}
   }
-  .rb-sheet{border-radius:26px;max-height:82vh;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
+  .rb-sheet{border-radius:26px;max-height:88vh;max-height:88dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;animation:rbModal .25s cubic-bezier(.2,.8,.2,1) both;}
   .rb-cols2{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start;}
   .rb-cols2 > *{margin-top:0 !important;}
   .rb-cols2 > div > .rb-h2:first-child{margin-top:2px;}
