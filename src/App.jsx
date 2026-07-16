@@ -214,7 +214,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 .rb-sheet-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
 .rb-sheet-h b{font-family:'Bricolage Grotesque';font-size:19px;}
 .rb-field{margin-bottom:13px}.rb-field label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px;}
-.rb-num{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);border:1px solid var(--brd);
+.rb-num{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.04);border:1px solid var(--brd);transition:border-color .2s;
   border-radius:12px;padding:9px 13px;margin-bottom:8px;}
 .rb-num label{font-size:13px}.rb-num input{width:84px;background:transparent;border:none;color:var(--aqua);text-align:right;
   font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;outline:none;}
@@ -4723,6 +4723,8 @@ function LogSheet({ latest, history, onClose, onSave }) {
   // (Pre-filling from the last reading was silently logging phantom data.)
   const [vals, setVals] = useState(() => { const o = {}; PARAMS.forEach((p) => (o[p.key] = "")); return o; });
   const entered = PARAMS.filter((p) => vals[p.key].trim() !== "" && Number.isFinite(parseFloat(vals[p.key])));
+  const statusColor = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)" };
+  const statusWord = { good: "in range", warn: "a little off", bad: "out of range" };
   return (
     <div className="rb-overlay" onClick={onClose}>
       <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
@@ -4732,12 +4734,24 @@ function LogSheet({ latest, history, onClose, onSave }) {
         </div>
         {PARAMS.map((p) => {
           const lv = history ? lastVal(history, p.key) : null;
+          const raw = vals[p.key].trim();
+          const num = raw !== "" ? parseFloat(raw) : null;
+          const st = num != null && Number.isFinite(num) ? statusOf(p, num) : "none";
           return (
-            <div key={p.key} className="rb-num">
-              <label>{p.label} <span style={{ color: "var(--muted)" }}>{p.unit}</span></label>
-              <input type="number" inputMode="decimal" value={vals[p.key]}
-                placeholder={lv ? `last: ${lv.v}` : "—"}
-                onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} />
+            <div key={p.key}>
+              <div className="rb-num" style={st !== "none" ? { borderColor: statusColor[st] } : null}>
+                <label>{p.label} <span style={{ color: "var(--muted)" }}>{p.unit}</span></label>
+                <input type="number" inputMode="decimal" value={vals[p.key]}
+                  placeholder={lv ? `last: ${lv.v}` : "—"}
+                  onChange={(e) => setVals((v) => ({ ...v, [p.key]: e.target.value }))} />
+              </div>
+              {st !== "none" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "-4px 2px 8px", fontSize: 11.5 }}>
+                  <span className={"rb-sdot " + sclass[st]} style={{ width: 7, height: 7 }} />
+                  <span style={{ color: statusColor[st], fontWeight: 600 }}>{statusWord[st]}</span>
+                  <span style={{ color: "var(--muted-2)" }}>· target {p.ideal[0]}–{p.ideal[1]}{p.unit}</span>
+                </div>
+              )}
             </div>
           );
         })}
