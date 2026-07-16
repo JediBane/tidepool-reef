@@ -3319,6 +3319,27 @@ function PhotoCredit({ item }) {
 function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTank }) {
   const [keepers, setKeepers] = useState(null);
   const [communityPhotos, setCommunityPhotos] = useState([]);
+  const [contribBusy, setContribBusy] = useState(false);
+  const [contribDone, setContribDone] = useState(false);
+  const contribRef = useRef(null);
+  // Contribute a photo straight from the species page — the legit way the library grows.
+  const contributePhoto = async (file) => {
+    if (!file || !uid) return;
+    setContribBusy(true);
+    try {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `contrib/${item.id}/${uid}-${Date.now()}.${ext}`;
+      const up = await supabase.storage.from("photos").upload(path, file, { upsert: false });
+      if (up.error) throw up.error;
+      const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
+      const { error } = await supabase.from("species_photo_contributions").insert({
+        species_id: item.id, contributor_id: uid, photo_url: pub.publicUrl, caption: item.name,
+      });
+      if (error) throw error;
+      setContribDone(true);
+    } catch (e) { console.error("contribute failed:", e.message || e); alert("Couldn't submit the photo — try again."); }
+    setContribBusy(false);
+  };
   useEffect(() => {
     let alive = true;
     if (item.cat === "Pest") { setKeepers([]); return; }
@@ -3366,14 +3387,36 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
           </span>
         </div>
         <div style={{ fontSize: 14, lineHeight: 1.6, color: "#d8eef5", marginBottom: 14 }}>{item.blurb}</div>
-        {communityPhotos.length > 0 && (
+        {item.cat !== "Pest" && (
           <div style={{ marginBottom: 14 }}>
-            <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}><Camera size={14} color="var(--teal)" /> Community photos <small>{communityPhotos.length}</small></div>
-            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
-              {communityPhotos.map((cp) => (
-                <img key={cp.id} src={cp.photo_url} alt={cp.caption || ""} style={{ height: 96, borderRadius: 10, flex: "none", objectFit: "cover" }} />
-              ))}
+            <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}>
+              <Camera size={14} color="var(--teal)" /> Community photos
+              <small>{communityPhotos.length || "none yet"}</small>
             </div>
+            {communityPhotos.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
+                {communityPhotos.map((cp) => (
+                  <img key={cp.id} src={cp.photo_url} alt={cp.caption || ""} style={{ height: 96, borderRadius: 10, flex: "none", objectFit: "cover" }} />
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 8 }}>
+                No community photos of {item.name} yet — keep one? Add the first real photo and help other reefers ID it.
+              </div>
+            )}
+            {/* Contribute — the legitimate, owned-by-consent way the library grows */}
+            <input ref={contribRef} type="file" accept="image/*" style={{ display: "none" }}
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) contributePhoto(f); e.target.value = ""; }} />
+            {contribDone ? (
+              <div style={{ fontSize: 12.5, color: "var(--good)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+                <Check size={14} /> Submitted for review — thanks for helping build Reefpedia!
+              </div>
+            ) : (
+              <div className="rb-chip" style={{ marginTop: 6, borderStyle: "dashed", color: "var(--teal)", borderColor: "var(--brd-2)", opacity: contribBusy ? .6 : 1 }}
+                onClick={() => !contribBusy && contribRef.current && contribRef.current.click()}>
+                <Camera size={13} style={{ verticalAlign: -2, marginRight: 5 }} />{contribBusy ? "Uploading…" : "Add your photo"}
+              </div>
+            )}
           </div>
         )}
         <div className="rb-card" style={{ padding: "4px 14px", marginBottom: 14 }}>
