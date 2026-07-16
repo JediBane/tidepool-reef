@@ -8,6 +8,7 @@ import {
   FlaskConical, Notebook, Camera, Bot, MessageCircle, Receipt, Settings, MapPin, Heart,
   ChevronRight, ChevronLeft, Check, RefreshCw, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
   Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, Users, SlidersHorizontal,
+  Trash2,
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
@@ -494,6 +495,11 @@ async function fetchTankChildren(tankId) {
 
 async function fetchAll(uid) {
   const { data: profile } = await supabase.from("profiles").select("*").eq("id", uid).single();
+  if (profile && (profile.status === "banned" || profile.status === "deleted")) {
+    const e = new Error(profile.status === "banned" ? "account_banned" : "account_deleted");
+    e.accountBlocked = profile.status;
+    throw e;
+  }
   let { data: tanksAll } = await supabase.from("tanks").select("*").eq("owner_id", uid).order("created_at");
   tanksAll = tanksAll || [];   // zero tanks = fresh account → onboarding handles it
   let savedId = null; try { savedId = localStorage.getItem("tr:tank"); } catch (e) {}
@@ -1058,7 +1064,19 @@ function TidepoolReef() {
     return () => sub.subscription.unsubscribe();
   }, []);
   useEffect(() => {
-    if (session && session.user) { setState(null); fetchAll(session.user.id).then(setState).catch((e) => console.error("load failed", e)); }
+    if (session && session.user) {
+      setState(null);
+      fetchAll(session.user.id).then(setState).catch((e) => {
+        if (e && e.accountBlocked) {
+          alert(e.accountBlocked === "banned"
+            ? "This account has been suspended. Contact support if you believe this is a mistake."
+            : "This account has been deleted.");
+          supabase.auth.signOut();
+        } else {
+          console.error("load failed", e);
+        }
+      });
+    }
   }, [session && session.user && session.user.id]);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -1831,6 +1849,22 @@ function AdminUsers({ state }) {
     setUsers((list) => list.map((x) => x.id === u.id ? { ...x, plan } : x));
     if (sel && sel.id === u.id) setSel({ ...sel, plan });
   };
+  const setStatus = async (u, status) => {
+    const verb = status === "banned" ? "suspend" : "reinstate";
+    if (!confirm(`Are you sure you want to ${verb} @${u.handle}?`)) return;
+    const { error } = await supabase.rpc("admin_set_status", { target: u.id, new_status: status });
+    if (error) { alert(error.message); return; }
+    setUsers((list) => list.map((x) => x.id === u.id ? { ...x, status } : x));
+    if (sel && sel.id === u.id) setSel({ ...sel, status });
+  };
+  const deleteUser = async (u) => {
+    if (!confirm(`Permanently delete @${u.handle} and all their data? This can't be undone.`)) return;
+    if (!confirm(`Really delete @${u.handle}? Final confirmation.`)) return;
+    const { error } = await supabase.rpc("admin_delete_user", { target: u.id });
+    if (error) { alert(error.message); return; }
+    setUsers((list) => list.filter((x) => x.id !== u.id));
+    setSel(null);
+  };
   const deletePost = async (pid) => {
     if (!confirm("Delete this post?")) return;
     const { error } = await supabase.rpc("admin_delete_post", { pid });
@@ -1914,6 +1948,18 @@ function AdminUsers({ state }) {
                 {sel.plan === "pro" ? "PRO ✓" : "Grant Pro"}
               </button>
             </div>
+
+            {!sel.is_admin && (
+              <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                {sel.status === "banned" ? (
+                  <button className="rb-btn ghost" style={{ flex: 1, padding: "9px 0", fontSize: 12.5 }} onClick={() => setStatus(sel, "active")}>Reinstate</button>
+                ) : (
+                  <button className="rb-btn ghost" style={{ flex: 1, padding: "9px 0", fontSize: 12.5, color: "#ffb43c", borderColor: "rgba(255,180,60,.4)" }} onClick={() => setStatus(sel, "banned")}>Suspend</button>
+                )}
+                <button className="rb-btn" style={{ flex: 1, padding: "9px 0", fontSize: 12.5, background: "rgba(255,93,114,.15)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.4)" }} onClick={() => deleteUser(sel)}>Delete user</button>
+              </div>
+            )}
+            {sel.status === "banned" && <div style={{ fontSize: 12, color: "#ffb43c", marginTop: 8, fontWeight: 600 }}>⚠ This account is suspended.</div>}
 
             {!detail && <div className="rb-empty" style={{ padding: 26 }}>Loading detail…</div>}
             {detail && (<>
@@ -4414,6 +4460,7 @@ function Seller({ state, openSell, markSold, removeListing }) {
 }
 function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTank }) {
   const [tankSheet, setTankSheet] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const Toggle = ({ on, onChange }) => (
     <div onClick={() => onChange(!on)} style={{
       width: 46, height: 27, borderRadius: 14, flex: "none", cursor: "pointer", position: "relative",
@@ -4479,8 +4526,57 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
         ))}
       </div>
       <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
+
+      <div className="rb-h2" style={{ marginTop: 22 }}><Trash2 size={15} color="var(--bad)" /> Danger zone</div>
+      <div className="rb-card" style={{ padding: 14, border: "1px solid rgba(255,93,114,.3)" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600 }}>Delete my account</div>
+        <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4, lineHeight: 1.5 }}>
+          Permanently removes your tanks, readings, livestock, posts, listings, and messages. This can't be undone.
+        </div>
+        <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 12, background: "rgba(255,93,114,.15)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.4)" }}
+          onClick={() => setDeleteOpen(true)}>Delete account</button>
+      </div>
+
       <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef</div>
       {tankSheet && <NewTankSheet onClose={() => setTankSheet(false)} onCreate={createTank} />}
+      {deleteOpen && <DeleteAccountSheet onClose={() => setDeleteOpen(false)} />}
+    </div>
+  );
+}
+
+function DeleteAccountSheet({ onClose }) {
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const doDelete = async () => {
+    setBusy(true);
+    const { error } = await supabase.rpc("delete_my_account");
+    if (error) { setBusy(false); alert("Couldn't delete your account — try again or contact support."); return; }
+    // Try to also remove the auth login via the server (works once SUPABASE_SERVICE_KEY is set).
+    try {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session && data.session.access_token;
+      if (token) await fetch("/api/account", { method: "DELETE", headers: { Authorization: "Bearer " + token } }).catch(() => {});
+    } catch (e) {}
+    await supabase.auth.signOut();
+    alert("Your account has been deleted.");
+    location.reload();
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Delete account</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div style={{ fontSize: 13.5, color: "#d8eef5", lineHeight: 1.6 }}>
+          This permanently deletes everything tied to your account — tanks, readings, livestock, journal, posts, listings, and messages. <b style={{ color: "#ff8fa0" }}>It cannot be undone.</b>
+        </div>
+        <div className="rb-field" style={{ marginTop: 16 }}><label>Type DELETE to confirm</label>
+          <input className="rb-input" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="DELETE" autoCapitalize="characters" />
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
+          <button className="rb-btn ghost" style={{ flex: 1 }} disabled={busy} onClick={onClose}>Cancel</button>
+          <button className="rb-btn" style={{ flex: 1, background: "rgba(255,93,114,.18)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.45)" }}
+            disabled={busy || confirm.trim().toUpperCase() !== "DELETE"} onClick={doDelete}>{busy ? "Deleting…" : "Delete forever"}</button>
+        </div>
+      </div>
     </div>
   );
 }
