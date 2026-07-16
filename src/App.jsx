@@ -1626,7 +1626,7 @@ function TidepoolReef() {
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid: state.uid, profile: state.profile }} />}
-        {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} onUpgrade={() => setUpgradeOpen(true)} />}
+        {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} uid={session.user.id} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
         {view === "admin" && <AdminPanel state={state} />}
         {view === "profile" && <Profile {...{ state, fish: (state.totals ? state.totals.fish : fish), corals: (state.totals ? state.totals.corals : corals), issues, go, switchTank, updateProfile, myPosts: (state.posts || []).filter((p) => p.mine) }} />}
@@ -4271,14 +4271,53 @@ function ReefID({ profile, onUpgrade, tanks, addTo }) {
 }
 
 /* ---------------- DeepDive AI ---------------- */
-function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
+function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [photo, setPhoto] = useState(null);   // {b64, media, url}
+  const [threadId, setThreadId] = useState(null);
+  const [threads, setThreads] = useState([]);       // past conversations
+  const [histOpen, setHistOpen] = useState(false);
   const fileRef = useRef(null);
   const scroller = useRef(null);
   useEffect(() => { if (scroller.current) scroller.current.scrollTop = scroller.current.scrollHeight; }, [msgs, busy]);
+
+  // Load this user's past DeepDive threads (most recent first).
+  const loadThreads = async () => {
+    if (!uid) return;
+    const { data } = await supabase.from("ai_threads").select("id, title, tank_id, updated_at").eq("user_id", uid).order("updated_at", { ascending: false }).limit(30);
+    setThreads(data || []);
+  };
+  useEffect(() => { loadThreads(); }, [uid]);
+
+  // Resume a saved conversation.
+  const openThread = async (id) => {
+    const { data } = await supabase.from("ai_messages").select("role, content, img_url, created_at").eq("thread_id", id).order("created_at");
+    setMsgs((data || []).map((m) => ({ role: m.role, content: m.content, img: m.img_url || null })));
+    setThreadId(id); setHistOpen(false);
+  };
+  const newChat = () => { setMsgs([]); setThreadId(null); };
+  const deleteThread = async (id) => {
+    await supabase.from("ai_threads").delete().eq("id", id);
+    setThreads((ts) => ts.filter((t) => t.id !== id));
+    if (id === threadId) newChat();
+  };
+  // Ensure a thread exists; create one titled from the first user message.
+  const ensureThread = async (firstUserText) => {
+    if (threadId) return threadId;
+    const title = (firstUserText || "New chat").replace(/\s+/g, " ").trim().slice(0, 48);
+    const { data, error } = await supabase.from("ai_threads").insert({ user_id: uid, tank_id: state.tankId, title }).select("id").single();
+    if (error || !data) { console.error("thread create failed:", error && error.message); return null; }
+    setThreadId(data.id);
+    loadThreads();
+    return data.id;
+  };
+  const persist = async (tid, role, content, imgUrl) => {
+    if (!tid) return;
+    await supabase.from("ai_messages").insert({ thread_id: tid, role, content: typeof content === "string" ? content : String(content), img_url: imgUrl || null });
+    await supabase.from("ai_threads").update({ updated_at: new Date().toISOString() }).eq("id", tid);
+  };
 
   const snapshot = () => {
     const parts = PARAMS.map((p) => {
@@ -4307,6 +4346,9 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
       : question;
     const history = [...msgs, { role: "user", content: display || question, img: attach ? attach.url : null, api }];
     setMsgs(history); setInput(""); setBusy(true);
+    // Persist the user turn (create the thread on first message).
+    const tid = await ensureThread(display || question);
+    if (tid) persist(tid, "user", display || question, attach ? attach.url : null);
     try {
       // Token control: only the 2 most recent photos travel to the API; older ones become a note.
       let imgsSeen = 0;
@@ -4320,7 +4362,9 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
       }).reverse();
       if (!(await gateAI("deepdive"))) { setBusy(false); return; }
       const reply = await askReefAI(apiMsgs, SYS, "deepdive");
-      setMsgs((m) => [...m, { role: "assistant", content: reply || "Hmm, I couldn't generate a response just now." }]);
+      const answer = reply || "Hmm, I couldn't generate a response just now.";
+      setMsgs((m) => [...m, { role: "assistant", content: answer }]);
+      if (tid) persist(tid, "assistant", answer, null);
     } catch (e) {
       if (e.limitReached && onUpgrade) { setMsgs((m) => m.slice(0, -1)); onUpgrade(); setBusy(false); return; }
       setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
@@ -4350,14 +4394,19 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
     else out.push({ label: "Is my tank ready for SPS?", q: "Looking at my parameters and stability, is my tank ready for SPS corals? What would you want to see first?" });
     // 4) Always-useful maintenance
     out.push({ label: "What should I test next?", q: "Given my recent readings, which parameters should I prioritise testing next and how often?" });
-    return out.slice(0, 4);
-  }, [state.tankId, state.livestock, state.history, issues]);
+    // 5) Continuity: nudge toward the most recent past conversation's topic
+    if (threads.length && !threadId) {
+      const last = threads[0];
+      if (last && last.title) out.unshift({ label: `Continue: ${last.title.slice(0, 28)}${last.title.length > 28 ? "…" : ""}`, q: null, resume: last.id });
+    }
+    return out.slice(0, 5);
+  }, [state.tankId, state.livestock, state.history, issues, threads, threadId]);
   return (
     <div className="rb-fadein">
       {state.profile.plan !== "pro" && (
         <FreeTasteBanner used={state.profile.deepdive_used} limit={FREE_DEEPDIVE} unit="free AI messages" onUpgrade={onUpgrade} />
       )}
-      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={async (id) => { await switchTank(id); setMsgs([]); }} />
+      <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={async (id) => { await switchTank(id); newChat(); }} />
       {state.tanks.length > 1 && (
         <div style={{ fontSize: 12.5, color: "var(--muted)", margin: "0 2px 12px", display: "flex", alignItems: "center", gap: 6 }}>
           <Bot size={14} color="var(--aqua)" /> DeepDive is looking at <b style={{ color: "var(--text)" }}>{t.name}</b> — switch tanks above to ask about another.
@@ -4385,14 +4434,16 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
           <div style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 2px 8px" }}>Or ask about your tank:</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
             {suggestions.map((s, i) => (
-              <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => !busy && send(s.q, s.label)}>{s.label}</div>
+              <div key={i} className="rb-chip" style={{ fontSize: 12 }} onClick={() => { if (busy) return; if (s.resume) openThread(s.resume); else send(s.q, s.label); }}>{s.label}</div>
             ))}
+            {threads.length > 0 && <div className="rb-chip" style={{ fontSize: 12 }} onClick={() => setHistOpen(true)}>🕐 Past chats</div>}
           </div>
         </>
       ) : (
-        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => !busy && diagnose()}>🔍 Re-diagnose {t.name}</div>
-          <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => setMsgs([])}>✨ New chat</div>
+          <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={newChat}>✨ New chat</div>
+          {threads.length > 0 && <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => setHistOpen(true)}>🕐 History</div>}
         </div>
       )}
       {photo && (
@@ -4416,6 +4467,28 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade }) {
         <button className="rb-btn" disabled={(!input.trim() && !photo) || busy} onClick={() => send(input.trim())}><Send size={16} /></button>
       </div>
       </div>
+
+      {histOpen && (
+        <div className="rb-overlay" onClick={() => setHistOpen(false)}>
+          <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="rb-sheet-h"><b>Past conversations</b><div className="rb-iconbtn" onClick={() => setHistOpen(false)}><X size={18} /></div></div>
+            {threads.length === 0 && <div className="rb-empty" style={{ padding: 24 }}>No saved conversations yet.</div>}
+            {threads.map((th) => {
+              const tank = state.tanks.find((x) => x.id === th.tank_id);
+              return (
+                <div key={th.id} className="rb-li" style={{ cursor: "pointer" }} onClick={() => openThread(th.id)}>
+                  <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--violet),#0b2b3d)" }}><Bot size={18} color="#04111a" /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="nm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{th.title || "Chat"}</div>
+                    <div className="sub">{tank ? tank.name + " · " : ""}{fmtDate(new Date(th.updated_at).getTime())}</div>
+                  </div>
+                  <span style={{ color: "var(--muted-2)", padding: 8, flex: "none" }} onClick={(e) => { e.stopPropagation(); if (confirm("Delete this conversation?")) deleteThread(th.id); }}><Trash2 size={16} /></span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
