@@ -1747,6 +1747,13 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
         return a + score * (p.w || 1);
       }, 0) / totalW) * 100)
     : null;
+  // Health band: label + color from the score.
+  const healthBand = health == null ? null
+    : health >= 85 ? { label: "Excellent", color: "#3ce0a3" }
+    : health >= 70 ? { label: "Good", color: "#5fd0a0" }
+    : health >= 55 ? { label: "Fair", color: "#ffc24d" }
+    : health >= 40 ? { label: "Watch", color: "#ff9d3c" }
+    : { label: "Needs care", color: "#ff5d72" };
   const nextTasks = [...state.tasks].sort((a, b) => a.due - b.due).slice(0, 2);
   const lastLog = state.log[0];
   return (
@@ -1762,10 +1769,16 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank }) {
           <div style={{ color: "var(--muted)", fontSize: 12.5 }}>{t.model} · {t.volume} gal · est. {t.since}</div>
         </div>
         <div style={{ position: "absolute", right: 16, bottom: 14, textAlign: "right" }}>
-          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 34, lineHeight: 1, background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }}>
+          <div style={{ fontSize: 9.5, color: "var(--muted)", letterSpacing: 1.2, marginBottom: 1 }}>HEALTH</div>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 34, lineHeight: 1,
+            ...(healthBand
+              ? { color: healthBand.color }
+              : { background: "linear-gradient(120deg,var(--aqua),var(--teal))", WebkitBackgroundClip: "text", backgroundClip: "text", color: "transparent" }) }}>
             {health == null ? "—" : health}
           </div>
-          <div style={{ fontSize: 10, color: "var(--muted)", letterSpacing: 1 }}>HEALTH</div>
+          {healthBand && (
+            <div style={{ fontSize: 11, fontWeight: 700, color: healthBand.color, letterSpacing: .3, marginTop: 3 }}>{healthBand.label}</div>
+          )}
         </div>
       </div>
 
