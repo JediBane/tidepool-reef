@@ -2733,7 +2733,7 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
           <span className="rb-ptag" style={{ background: post.tagc + "22", color: post.tagc, border: `1px solid ${post.tagc}55` }}>{post.tag}</span>
         </div>
         <div className="rb-pbody">{post.body}</div>
-        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ objectFit: "cover", width: "100%" }} />}
+        {post.img && <img className="rb-pimg" src={post.img} alt="" style={{ height: "auto", maxHeight: "60vh", objectFit: "contain", width: "100%", background: "rgba(3,8,12,.5)" }} />}
         <div className="rb-pacts" style={{ marginBottom: 16 }}>
           <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
             <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
