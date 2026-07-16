@@ -944,6 +944,8 @@ function Onboarding({ profile, onDone }) {
   const [since, setSince] = useState(String(new Date().getFullYear()));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Returning user who deleted all tanks (vs. a brand-new signup) — friendlier, non-"welcome" copy.
+  const returning = (() => { try { return localStorage.getItem("tr:firstrun") === "1"; } catch (e) { return false; } })();
 
   const create = async () => {
     setBusy(true); setErr("");
@@ -978,13 +980,18 @@ function Onboarding({ profile, onDone }) {
 
           {step === 0 && (<div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 44 }}>🪸</div>
-            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21, marginTop: 10 }}>Welcome, @{profile.handle}!</div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21, marginTop: 10 }}>
+              {returning ? "Let's set up a tank" : `Welcome, @${profile.handle}!`}
+            </div>
             <div style={{ color: "var(--muted)", fontSize: 14, lineHeight: 1.6, marginTop: 10 }}>
-              Your reef journal starts here — track parameters, log livestock, and get answers when something looks off.
-              <br /><br />Would you like to set up your first tank?
+              {returning ? (
+                <>You don't have any tanks right now. Add one to start tracking parameters, logging livestock, and getting answers again — takes about a minute.</>
+              ) : (
+                <>Your reef journal starts here — track parameters, log livestock, and get answers when something looks off.<br /><br />Would you like to set up your first tank?</>
+              )}
             </div>
             <button className="rb-btn" style={{ width: "100%", marginTop: 20, padding: 14 }} onClick={() => setStep(1)}>
-              <Waves size={16} /> Set up my first tank
+              <Waves size={16} /> {returning ? "Set up a tank" : "Set up my first tank"}
             </button>
             <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 12, cursor: "pointer" }} onClick={() => supabase.auth.signOut()}>Sign out</div>
           </div>)}
