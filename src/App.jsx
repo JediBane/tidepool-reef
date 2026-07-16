@@ -381,7 +381,13 @@ const diffColor = { Easy: "#3ce0a3", Medium: "#ffc24d", Hard: "#ff5d72" };
 /* ---------------- Supabase ---------------- */
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://dhluuqpdbshvhnskyprb.supabase.co";
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_KEY || "sb_publishable_9RMUI6qMi33Ju4ATaudIlQ_JxmkxPKb";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    detectSessionInUrl: true,   // pick up the auth token when users return from the email confirm link
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
 
 const DEFAULT_TASKS = [
   { name: "Water change (2 gal)", every: "Weekly", offset: 0 },
@@ -1038,7 +1044,13 @@ function TidepoolReef() {
   const [session, setSession] = useState(undefined); // undefined=checking, null=signed out
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session ?? null));
-    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    const { data: sub } = supabase.auth.onAuthStateChange((_e, s) => {
+      setSession(s);
+      // After the email-confirm token is consumed, strip it from the URL bar.
+      if (s && typeof window !== "undefined" && (window.location.hash.includes("access_token") || window.location.search.includes("code="))) {
+        window.history.replaceState({}, "", window.location.pathname);
+      }
+    });
     // Learn up-front whether the server gate counts, so the client never double-counts.
     fetch("/api/chat", { method: "GET" }).then((r) => r.json()).then((d) => {
       if (d && d.gateActive) AI_GATE_STATE.serverCounts = true;
