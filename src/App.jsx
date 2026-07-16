@@ -435,7 +435,7 @@ async function fetchPublicTank(tankId) {
   ]);
   let owner = null;
   if (tank) {
-    const { data: p } = await supabase.from("profiles")
+    const { data: p } = await supabase.from("public_profiles")
       .select("handle, display_name, location, reefing_since, badges").eq("id", tank.owner_id).single();
     owner = p;
   }
@@ -450,7 +450,7 @@ async function fetchRecentParams() {
 async function fetchComments(postId) {
   const [{ data, error }, { data: pf }] = await Promise.all([
     supabase.from("post_comments").select("*").eq("post_id", postId).order("created_at"),
-    supabase.from("profiles").select("id, handle"),
+    supabase.from("public_profiles").select("id, handle"),
   ]);
   if (error) console.error("[tidepool] comments query failed:", error.message);
   const people = {};
@@ -463,7 +463,7 @@ async function fetchThreads(uid) {
     supabase.from("messages").select("*")
       .or(`sender_id.eq.${uid},recipient_id.eq.${uid}`)
       .order("created_at", { ascending: false }).limit(200),
-    supabase.from("profiles").select("id, handle"),
+    supabase.from("public_profiles").select("id, handle"),
   ]);
   if (error) console.error("[tidepool] messages query failed:", error.message);
   const people = {};
@@ -522,7 +522,7 @@ async function fetchAll(uid) {
     supabase.from("post_likes").select("post_id").eq("profile_id", uid),
     supabase.from("post_comments").select("post_id"),
     fetchSpeciesCounts(),
-    supabase.from("profiles").select("id, handle, display_name"),
+    supabase.from("public_profiles").select("id, handle, display_name"),
     myTankIds.length ? supabase.from("livestock").select("kind, species_id, tank_id").in("tank_id", myTankIds) : Promise.resolve({ data: [] }),
     supabase.from("follows").select("follower_id, followee_id"),
   ]);
@@ -4807,7 +4807,7 @@ function Notifications({ uid }) {
         ids.length ? supabase.from("post_likes").select("post_id, profile_id, created_at").in("post_id", ids) : Promise.resolve({ data: [] }),
         ids.length ? supabase.from("post_comments").select("post_id, author_id, body, created_at").in("post_id", ids) : Promise.resolve({ data: [] }),
         supabase.from("messages").select("sender_id, body, created_at").eq("recipient_id", uid).order("created_at", { ascending: false }).limit(10),
-        supabase.from("profiles").select("id, handle"),
+        supabase.from("public_profiles").select("id, handle"),
       ]);
       const handle = Object.fromEntries((profiles.data || []).map((p) => [p.id, p.handle]));
       const postBody = Object.fromEntries((myPosts || []).map((p) => [p.id, (p.body || "").slice(0, 44)]));
