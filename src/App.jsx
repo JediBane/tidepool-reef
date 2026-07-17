@@ -5105,6 +5105,27 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     setThreads(data || []);
   };
   useEffect(() => { loadThreads(); }, [uid]);
+  // Which past conversations are already in a journal (for the history drawer's save button)
+  const [journaled, setJournaled] = useState({});
+  useEffect(() => {
+    if (!histOpen || !threads.length) return;
+    let alive = true;
+    supabase.from("tank_log").select("ai_thread_id").in("ai_thread_id", threads.map((t) => t.id))
+      .then(({ data }) => { if (alive) { const m = {}; (data || []).forEach((r) => (m[r.ai_thread_id] = true)); setJournaled(m); } });
+    return () => { alive = false; };
+  }, [histOpen, threads]);
+  const journalThread = async (th) => {
+    if (journaled[th.id]) return;
+    // Excerpt from the thread's first assistant reply
+    const { data: firstA } = await supabase.from("ai_messages").select("content").eq("thread_id", th.id).eq("role", "assistant").order("created_at").limit(1).maybeSingle();
+    const excerpt = firstA && firstA.content ? firstA.content.replace(/\s+/g, " ").trim().slice(0, 170) : "";
+    const { error } = await supabase.from("tank_log").insert({
+      tank_id: th.tank_id || state.tankId, entry_type: "DeepDive", ai_thread_id: th.id,
+      note: `Asked: "${(th.title || "Chat").slice(0, 70)}"${excerpt ? ` — ${excerpt}…` : ""}`,
+    });
+    if (error) { console.error("journal thread failed:", error.message); alert("Couldn't save to journal — try again."); return; }
+    setJournaled((m) => ({ ...m, [th.id]: true }));
+  };
   // If a journal entry sent us here, open that saved conversation.
   useEffect(() => {
     if (PENDING_AI_THREAD.id) { const t = PENDING_AI_THREAD.id; PENDING_AI_THREAD.id = null; openThread(t); }
@@ -5321,6 +5342,11 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
                     <div className="nm" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{th.title || "Chat"}</div>
                     <div className="sub">{tank ? tank.name + " · " : ""}{fmtDate(new Date(th.updated_at).getTime())}</div>
                   </div>
+                  <span style={{ color: journaled[th.id] ? "var(--good)" : "var(--aqua)", padding: 8, flex: "none" }}
+                    title={journaled[th.id] ? "In the journal" : "Save to journal"}
+                    onClick={(e) => { e.stopPropagation(); journalThread(th); }}>
+                    {journaled[th.id] ? <Check size={16} /> : <Notebook size={16} />}
+                  </span>
                   <span style={{ color: "var(--muted-2)", padding: 8, flex: "none" }} onClick={(e) => { e.stopPropagation(); if (confirm("Delete this conversation?")) deleteThread(th.id); }}><Trash2 size={16} /></span>
                 </div>
               );
