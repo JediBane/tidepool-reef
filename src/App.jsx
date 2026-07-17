@@ -605,12 +605,13 @@ const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
 const AI_GATE = { check: null, sync: null };   // main component installs the checker + counter sync
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
-const AI_GATE_STATE = { serverCounts: false };
+const AI_GATE_STATE = { serverCounts: false, disabled: false };
 // Journal → DeepDive handoff: tap a DeepDive journal entry to reopen that conversation.
 const PENDING_AI_THREAD = { id: null };
 
 /* Returns true if the call may proceed. Opens the upgrade sheet + returns false otherwise. */
 async function gateAI(kind) {
+  if (AI_GATE_STATE.disabled) { alert("AI features are briefly paused for maintenance — back soon!"); return false; }
   if (AI_GATE.check) return AI_GATE.check(kind);
   return true;
 }
@@ -1146,6 +1147,23 @@ function TidepoolReef() {
   const [libItem, setLibItem] = useState(null);
   const [addItem, setAddItem] = useState(null);
   const [publicTank, setPublicTank] = useState(null);
+  // Activity ping (throttled to hourly) + app settings (announcement, AI kill switch)
+  const [appSettings, setAppSettings] = useState({});
+  useEffect(() => {
+    if (!state) return;
+    try {
+      const last = Number(localStorage.getItem("tr:seen") || 0);
+      if (Date.now() - last > 3600000) {
+        localStorage.setItem("tr:seen", String(Date.now()));
+        supabase.from("profiles").update({ last_seen_at: new Date().toISOString() }).eq("id", state.uid).then(() => {});
+      }
+    } catch (e) {}
+    supabase.from("app_settings").select("key, value").then(({ data }) => {
+      const s = {}; (data || []).forEach((r) => (s[r.key] = r.value));
+      AI_GATE_STATE.disabled = s.ai_enabled === false;
+      setAppSettings(s);
+    });
+  }, [state && state.uid]);
   // Shareable tank links: /?tank=<id> opens that public tank once signed in.
   useEffect(() => {
     try {
@@ -1692,6 +1710,20 @@ function TidepoolReef() {
           <div className="rb-avbtn" onClick={() => go("profile")}><CoralAvatar size={42} /><span className="rb-avdot" /></div>
         </div>
 
+        {appSettings.announcement && typeof appSettings.announcement === "string" && (() => {
+          let dismissed = false;
+          try { dismissed = localStorage.getItem("tr:ann") === appSettings.announcement; } catch (e) {}
+          if (dismissed) return null;
+          return (
+            <div className="rb-card" style={{ padding: "11px 14px", marginBottom: 10, display: "flex", alignItems: "center", gap: 10, border: "1px solid rgba(63,227,255,.4)", background: "rgba(63,227,255,.07)" }}>
+              <Bell size={15} color="var(--aqua)" style={{ flex: "none" }} />
+              <div style={{ fontSize: 13, lineHeight: 1.5, flex: 1 }}>{appSettings.announcement}</div>
+              <X size={15} color="var(--muted)" style={{ cursor: "pointer", flex: "none" }}
+                onClick={(e) => { try { localStorage.setItem("tr:ann", appSettings.announcement); } catch (err) {} e.currentTarget.closest(".rb-card").style.display = "none"; }} />
+            </div>
+          );
+        })()}
+
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, go, uid: state.uid, profile: state.profile }} />}
@@ -2077,12 +2109,21 @@ function AdminUsers({ state }) {
   const [sel, setSel] = useState(null);          // selected user for detail
   const [detail, setDetail] = useState(null);
 
-  const load = async () => {
-    const { data, error } = await supabase.rpc("admin_list_users");
+  const [total, setTotal] = useState(0);
+  const PAGE = 50;
+  const load = async (append = false, off = 0) => {
+    const { data, error } = await supabase.rpc("admin_list_users", {
+      q: q.trim() || null,
+      f_status: null,
+      f_plan: planF === "all" ? null : planF,
+      sort: sort === "pearls" ? "newest" : sort,
+      lim: PAGE, off,
+    });
     if (error) { setErr(error.message); return; }
-    setUsers(data || []);
+    setTotal((data && data.total) || 0);
+    setUsers((prev) => append ? [...(prev || []), ...(data.users || [])] : (data.users || []));
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { const t = setTimeout(() => load(), q ? 300 : 0); return () => clearTimeout(t); }, [q, planF, sort]);
 
   useEffect(() => {
     if (!sel) { setDetail(null); return; }
@@ -2136,22 +2177,14 @@ function AdminUsers({ state }) {
 
   const pro = users.filter((u) => u.plan === "pro").length;
   const mrr = (pro * 6.99).toFixed(0);
-  const ql = q.trim().toLowerCase();
-  const shown = users
-    .filter((u) => planF === "all" || u.plan === planF)
-    .filter((u) => !ql || (u.handle || "").toLowerCase().includes(ql) || (u.email || "").toLowerCase().includes(ql) || (u.display_name || "").toLowerCase().includes(ql))
-    .sort((a, b) => {
-      if (sort === "active") return ((b.reefid_used || 0) + (b.deepdive_used || 0)) - ((a.reefid_used || 0) + (a.deepdive_used || 0));
-      if (sort === "pearls") return (b.pearls || 0) - (a.pearls || 0);
-      return new Date(b.joined) - new Date(a.joined);
-    });
+  const shown = sort === "pearls" ? [...users].sort((a, b) => (b.pearls || 0) - (a.pearls || 0)) : users;
   const fmtD = (d) => d ? new Date(d).toLocaleDateString() : "never";
 
   return (
     <div>
       {/* stats */}
       <div className="rb-card" style={{ display: "flex", justifyContent: "space-around", padding: 14, textAlign: "center", marginTop: 4, flexWrap: "wrap", gap: 8 }}>
-        <div className="rb-stat"><div className="v">{users.length}</div><div className="k">Users</div></div>
+        <div className="rb-stat"><div className="v">{total}</div><div className="k">Users</div></div>
         <div className="rb-stat"><div className="v">{pro}</div><div className="k">Pro</div></div>
         <div className="rb-stat"><div className="v">${mrr}</div><div className="k">Est. MRR</div></div>
         <div className="rb-stat"><div className="v">{users.reduce((a, u) => a + (u.reefid_used || 0), 0)}</div><div className="k">ReefIDs</div></div>
@@ -2181,7 +2214,7 @@ function AdminUsers({ state }) {
               <div className="nm">@{u.handle} {u.is_admin && <span style={{ color: "var(--gold)", fontSize: 10.5 }}>ADMIN</span>}</div>
               <div className="sub" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{u.email || "—"}</div>
               <div style={{ fontSize: 10.5, color: "var(--muted-2)", marginTop: 2 }}>
-                joined {fmtD(u.joined)} · {u.reefid_used || 0} IDs · {u.deepdive_used || 0} AI · {u.pearls || 0} pearls
+                joined {fmtD(u.joined || u.created_at)} · seen {fmtD(u.last_seen_at)} · {u.reefid_used || 0} IDs · {u.deepdive_used || 0} AI · {u.pearls || 0} pearls
               </div>
             </div>
             <span className="rb-badge" style={{ flex: "none", background: u.plan === "pro" ? "rgba(46,230,200,.15)" : "rgba(255,255,255,.05)",
@@ -2192,6 +2225,10 @@ function AdminUsers({ state }) {
           </div>
         ))}
       </div>
+      {users.length < total && (
+        <button className="rb-btn ghost" style={{ width: "100%", marginTop: 10, padding: 11, fontSize: 13 }}
+          onClick={() => load(true, users.length)}>Load more ({users.length} of {total})</button>
+      )}
 
       {/* customer detail — portal so it can't be trapped by animated ancestors */}
       {sel && createPortal(
@@ -2200,7 +2237,7 @@ function AdminUsers({ state }) {
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div>
                 <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>@{sel.handle} {sel.is_admin && <span style={{ color: "var(--gold)", fontSize: 11 }}>ADMIN</span>}</div>
-                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{sel.email || "—"} · joined {fmtD(sel.joined)}</div>
+                <div style={{ fontSize: 12.5, color: "var(--muted)" }}>{sel.email || "—"} · joined {fmtD(sel.joined || sel.created_at)}</div>
               </div>
               <button className={"rb-btn" + (sel.plan === "pro" ? "" : " ghost")} style={{ marginLeft: "auto", flex: "none", padding: "8px 14px", fontSize: 12 }}
                 onClick={() => setPlan(sel, sel.plan === "pro" ? "free" : "pro")}>
@@ -2271,10 +2308,11 @@ function AdminOverview() {
   const t = stats.totals || {};
   const weeks = stats.weeks || [];
   const kpis = [
-    ["Users", t.users, "🧑‍🤝‍🧑"], ["Pro subs", t.pro, "⭐"], ["Est. MRR", "$" + (t.pro * 6.99).toFixed(0), "💵"],
+    ["Users", t.users, "🧑‍🤝‍🧑"], ["Active today", t.active1, "🟢"], ["Active 7d", t.active7, "📆"],
+    ["Pro subs", t.pro, "⭐"], ["Est. MRR", "$" + (t.pro * 6.99).toFixed(0), "💵"],
     ["Tanks", t.tanks, "🪣"], ["Readings", t.readings, "🧪"], ["Posts", t.posts, "💬"],
     ["Comments", t.comments, "↩️"], ["Listings", t.listings, "🏪"], ["ReefIDs", t.reefids, "📸"], ["AI msgs", t.aimsgs, "🤖"],
-    ["AI threads", t.threads, "🧵"], ["Events", t.events, "📅"], ["Wishlists", t.wishes, "❤️"], ["Photo queue", t.photoq, "🖼️"],
+    ["AI threads", t.threads, "🧵"], ["Events", t.events, "📅"], ["Wishlists", t.wishes, "❤️"], ["Photo queue", t.photoq, "🖼️"], ["Open reports", t.reportsq, "⚑"],
   ];
   const chart = (key, color, label) => (
     <div className="rb-card rb-chartwrap" style={{ marginTop: 12 }}>
@@ -2444,31 +2482,160 @@ function AdminMarket() {
   );
 }
 
+function AdminReports() {
+  const [reports, setReports] = useState(null);
+  const load = () => supabase.rpc("admin_list_reports").then(({ data, error }) => { if (!error) setReports(data || []); });
+  useEffect(() => { load(); }, []);
+  const resolve = async (r, status) => {
+    await supabase.rpc("admin_resolve_report", { rid: r.id, new_status: status });
+    load();
+  };
+  const nuke = async (r) => {
+    if (!confirm(`Delete the reported ${r.type}?`)) return;
+    const rpcMap = { post: ["admin_delete_post", "pid"], comment: ["admin_delete_comment", "cid"], listing: ["admin_delete_listing", "lid"], event: ["admin_delete_event", "eid"] };
+    const m = rpcMap[r.type];
+    if (m) { const { error } = await supabase.rpc(m[0], { [m[1]]: r.target_id }); if (error) return alert(error.message); }
+    await resolve(r, "resolved");
+  };
+  const suspend = async (r) => {
+    if (!r.author_id || !confirm("Suspend the author of this content?")) return;
+    const { error } = await supabase.rpc("admin_set_status", { target: r.author_id, new_status: "banned" });
+    if (error) return alert(error.message);
+    await resolve(r, "resolved");
+  };
+  if (!reports) return <div className="rb-empty" style={{ padding: 36 }}>Loading reports…</div>;
+  const open = reports.filter((r) => r.status === "open");
+  const closed = reports.filter((r) => r.status !== "open");
+  const row = (r) => (
+    <div key={r.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="nm" style={{ textTransform: "capitalize" }}>{r.type} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· reported by @{r.reporter} · {fmtDate(new Date(r.created).getTime())}</span></div>
+        {r.preview && <div className="sub" style={{ marginTop: 2 }}>"{r.preview}"</div>}
+        {r.reason && <div className="sub" style={{ marginTop: 2, color: "var(--warn)" }}>Reason: {r.reason}</div>}
+        {r.status === "open" ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            {r.type !== "user" && <div className="rb-chip" style={{ fontSize: 11.5, color: "var(--bad)" }} onClick={() => nuke(r)}>Delete {r.type}</div>}
+            {r.author_id && <div className="rb-chip" style={{ fontSize: 11.5, color: "#ffb43c" }} onClick={() => suspend(r)}>Suspend author</div>}
+            <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => resolve(r, "dismissed")}>Dismiss</div>
+          </div>
+        ) : <div className="sub" style={{ marginTop: 4, color: r.status === "resolved" ? "var(--good)" : "var(--muted-2)" }}>{r.status}</div>}
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>⚑ Open reports <small>{open.length}</small></div>
+      <div className="rb-card">{open.length === 0 ? <div className="rb-empty" style={{ padding: 18 }}>Nothing reported. Quiet reef.</div> : open.map(row)}</div>
+      {closed.length > 0 && (<>
+        <div className="rb-h2" style={{ marginTop: 18 }}>Recently handled <small>{closed.length}</small></div>
+        <div className="rb-card">{closed.slice(0, 15).map(row)}</div>
+      </>)}
+    </div>
+  );
+}
+
+function AdminSettings() {
+  const [ann, setAnn] = useState("");
+  const [aiOn, setAiOn] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    supabase.from("app_settings").select("key, value").then(({ data }) => {
+      (data || []).forEach((r) => {
+        if (r.key === "announcement") setAnn(typeof r.value === "string" ? r.value : "");
+        if (r.key === "ai_enabled") setAiOn(r.value !== false);
+      });
+      setLoaded(true);
+    });
+  }, []);
+  const save = async (k, v) => {
+    setBusy(true);
+    const { error } = await supabase.rpc("admin_set_setting", { k, v });
+    setBusy(false);
+    if (error) alert(error.message);
+  };
+  if (!loaded) return <div className="rb-empty" style={{ padding: 36 }}>Loading settings…</div>;
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>📣 Announcement banner</div>
+      <div className="rb-card" style={{ padding: 16 }}>
+        <textarea className="rb-input" rows={2} placeholder="Shown to every user at the top of the app until dismissed. Leave empty for none."
+          value={ann} onChange={(e) => setAnn(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <button className="rb-btn" style={{ flex: 1, padding: 11 }} disabled={busy} onClick={() => save("announcement", ann.trim() || null)}>Publish</button>
+          <button className="rb-btn ghost" style={{ flex: 1, padding: 11 }} disabled={busy} onClick={() => { setAnn(""); save("announcement", null); }}>Clear banner</button>
+        </div>
+        <div style={{ fontSize: 11.5, color: "var(--muted-2)", marginTop: 8 }}>Use for maintenance windows, launches, events. Users can dismiss; a new message re-appears.</div>
+      </div>
+      <div className="rb-h2" style={{ marginTop: 18 }}>🤖 AI features</div>
+      <div className="rb-card" style={{ padding: 16, display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <b style={{ fontSize: 14 }}>AI enabled</b>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Kill switch for DeepDive + ReefID — flip off if API costs spike or the provider has an outage. Users see a friendly "paused for maintenance" note.</div>
+        </div>
+        <div className={"rb-chip" + (aiOn ? " on" : "")} style={{ flex: "none" }} onClick={() => { const n = !aiOn; setAiOn(n); save("ai_enabled", n); }}>{aiOn ? "ON" : "OFF"}</div>
+      </div>
+    </div>
+  );
+}
+
+function AdminAudit() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { supabase.rpc("admin_list_audit").then(({ data, error }) => { if (!error) setRows(data || []); }); }, []);
+  if (!rows) return <div className="rb-empty" style={{ padding: 36 }}>Loading audit trail…</div>;
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>🧾 Admin actions <small>last {rows.length}</small></div>
+      <div className="rb-card">
+        {rows.length === 0 && <div className="rb-empty" style={{ padding: 18 }}>No admin actions recorded yet.</div>}
+        {rows.map((a) => (
+          <div key={a.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">{a.action} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· @{a.admin} · {fmtDate(new Date(a.at).getTime())}</span></div>
+              <div className="sub">{a.target}{a.detail ? ` — ${a.detail}` : ""}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel({ state }) {
   const [tab, setTab] = useState("overview");
   const [photoQ, setPhotoQ] = useState(0);
+  const [reportQ, setReportQ] = useState(0);
   useEffect(() => {
     let alive = true;
     supabase.from("species_photo_contributions").select("id", { count: "exact", head: true }).eq("status", "pending")
       .then(({ count }) => { if (alive && count != null) setPhotoQ(count); });
+    supabase.rpc("admin_list_reports").then(({ data, error }) => {
+      if (alive && !error) setReportQ((data || []).filter((r) => r.status === "open").length);
+    });
     return () => { alive = false; };
   }, [tab]);
   return (
     <div className="rb-fadein">
       <div className="rb-tabs" style={{ marginTop: 4, flexWrap: "wrap" }}>
-        {[["overview", "Overview"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"]].map(([k, l]) => (
-          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)} style={{ position: "relative" }}>
-            {l}{k === "photos" && photoQ > 0 && (
-              <span style={{ marginLeft: 6, background: "var(--coral)", color: "#04111a", fontWeight: 800, fontSize: 10, borderRadius: 12, padding: "1px 6px" }}>{photoQ}</span>
-            )}
-          </div>
-        ))}
+        {[["overview", "Overview"], ["reports", "Reports"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"], ["settings", "Settings"], ["audit", "Audit"]].map(([k, l]) => {
+          const badge = k === "photos" ? photoQ : k === "reports" ? reportQ : 0;
+          return (
+            <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)} style={{ position: "relative" }}>
+              {l}{badge > 0 && (
+                <span style={{ marginLeft: 6, background: "var(--coral)", color: "#04111a", fontWeight: 800, fontSize: 10, borderRadius: 12, padding: "1px 6px" }}>{badge}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
       {tab === "overview" && <AdminOverview />}
       {tab === "users" && <AdminUsers state={state} />}
       {tab === "content" && <AdminContent />}
       {tab === "market" && <AdminMarket />}
       {tab === "photos" && <AdminPhotos />}
+      {tab === "reports" && <AdminReports />}
+      {tab === "settings" && <AdminSettings />}
+      {tab === "audit" && <AdminAudit />}
     </div>
   );
 }
@@ -3010,6 +3177,15 @@ function PostSheet({ post, liked, toggleLike, addComment, onClose }) {
         </div>
         <div className="rb-pbody">{post.body}</div>
         {post.img && <PostImg src={post.img} detail />}
+        <div style={{ textAlign: "right", marginTop: 2 }}>
+          <span style={{ fontSize: 11.5, color: "var(--muted-2)", cursor: "pointer" }}
+            onClick={async () => {
+              const reason = prompt("Report this post — what's wrong?");
+              if (reason === null) return;
+              const { error } = await supabase.from("reports").insert({ reporter_id: uid, target_type: "post", target_id: post.id, reason: reason.trim() || null });
+              alert(error ? "Couldn't send the report — try again." : "Reported. Thanks for keeping the reef clean — a moderator will review it.");
+            }}>⚑ Report</span>
+        </div>
         <div className="rb-pacts" style={{ marginBottom: 16 }}>
           <span className={isLiked ? "liked" : ""} onClick={() => toggleLike(post.id)}>
             <Heart size={16} fill={isLiked ? "var(--coral)" : "none"} /> {post.likes}
