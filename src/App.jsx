@@ -428,6 +428,19 @@ async function fetchKeepers(sid) {
   const { data } = await supabase.rpc("species_keepers", { sid });
   return data || [];
 }
+async function fetchEvents() {
+  const [ev, rs, pf] = await Promise.all([
+    supabase.from("events").select("*").gte("event_date", new Date().toISOString().slice(0, 10)).order("event_date").limit(10),
+    supabase.from("event_rsvps").select("*"),
+    supabase.from("public_profiles").select("id, handle"),
+  ]);
+  const handles = {}; (pf.data || []).forEach((p) => (handles[p.id] = p.handle));
+  return (ev.data || []).map((e) => ({
+    ...e, host: handles[e.host_id] || "reefer",
+    rsvps: (rs.data || []).filter((r) => r.event_id === e.id).map((r) => ({ ...r, handle: handles[r.profile_id] || "reefer" })),
+  }));
+}
+
 async function fetchPublicTank(tankId) {
   const [{ data: tank }, { data: stock }] = await Promise.all([
     supabase.from("tanks").select("*").eq("id", tankId).single(),
@@ -1133,6 +1146,13 @@ function TidepoolReef() {
   const [libItem, setLibItem] = useState(null);
   const [addItem, setAddItem] = useState(null);
   const [publicTank, setPublicTank] = useState(null);
+  // Shareable tank links: /?tank=<id> opens that public tank once signed in.
+  useEffect(() => {
+    try {
+      const p = new URLSearchParams(window.location.search).get("tank");
+      if (p) { setPublicTank(p); setSheet("publicTank"); window.history.replaceState({}, "", window.location.pathname); }
+    } catch (e) {}
+  }, []);
   const [msgTo, setMsgTo] = useState(null);
   const [toast, setToast] = useState(0);
 
@@ -1853,6 +1873,16 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank 
         <button className="rb-btn" style={{ flex: 1, padding: 13 }} onClick={() => setSheet("log")}><Beaker size={16} /> Log test</button>
         <button className="rb-btn ghost" style={{ flex: 1, padding: 13 }} onClick={() => go("log")}><Notebook size={16} /> Journal</button>
         <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={() => go("deepdive")}><Bot size={16} /> Ask AI</button>
+        {state.tank && state.tank.is_public !== false && (
+          <button className="rb-btn" style={{ flex: "none", padding: "13px 15px" }} title="Share a public link to this tank"
+            onClick={async () => {
+              const url = `${window.location.origin}/?tank=${state.tankId}`;
+              try {
+                if (navigator.share) await navigator.share({ title: `${state.tank.name} on Tidepool Reef`, url });
+                else { await navigator.clipboard.writeText(url); alert("Tank link copied — anyone with the app can view your public tank."); }
+              } catch (e) {}
+            }}><Send size={16} /></button>
+        )}
       </div>
 
       <div className="rb-h2"><FlaskConical size={16} color="var(--aqua)" /> Latest parameters
@@ -2608,7 +2638,51 @@ function EditProfileSheet({ profile, onClose, onSave }) {
 }
 
 /* ---------------- Feed ---------------- */
+function HostEventSheet({ uid, onClose, onCreated }) {
+  const [title, setTitle] = useState("");
+  const [location, setLocation] = useState("");
+  const [date, setDate] = useState(new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10));
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!title.trim() || busy) return;
+    setBusy(true);
+    const { error } = await supabase.from("events").insert({ host_id: uid, title: title.trim(), location: location.trim() || null, event_date: date, details: details.trim() || null });
+    setBusy(false);
+    if (error) { console.error("event create failed:", error.message); alert("Couldn't create the event — try again."); return; }
+    onCreated();
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Host an event</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div className="rb-field"><label>What is it?</label>
+          <input className="rb-input" placeholder="e.g. Space Coast Frag Swap" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
+        <div className="rb-field"><label>Where?</label>
+          <input className="rb-input" placeholder="e.g. Melbourne, FL — DM for address" value={location} onChange={(e) => setLocation(e.target.value)} /></div>
+        <div className="rb-field"><label>When?</label>
+          <input className="rb-input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
+        <div className="rb-field"><label>Details (optional)</label>
+          <textarea className="rb-input" rows={2} placeholder="Bring frags to trade, coolers provided…" value={details} onChange={(e) => setDetails(e.target.value)} /></div>
+        <button className="rb-btn" style={{ width: "100%", padding: 13, marginTop: 4 }} disabled={!title.trim() || busy} onClick={save}>
+          <Calendar size={15} /> {busy ? "Creating…" : "Create event"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following, toggleFollow }) {
+  const [events, setEvents] = useState([]);
+  const [hostOpen, setHostOpen] = useState(false);
+  const loadEvents = () => fetchEvents().then(setEvents);
+  useEffect(() => { loadEvents(); }, []);
+  const rsvp = async (ev, bringing) => {
+    const mine = ev.rsvps.find((r) => r.profile_id === uid);
+    if (mine && bringing === undefined) await supabase.from("event_rsvps").delete().eq("event_id", ev.id).eq("profile_id", uid);
+    else await supabase.from("event_rsvps").upsert({ event_id: ev.id, profile_id: uid, bringing: bringing || (mine && mine.bringing) || null });
+    loadEvents();
+  };
   const [feedTab, setFeedTab] = useState("all");   // all | following
   const [draft, setDraft] = useState("");
   const [tag, setTag] = useState("Update");
@@ -2666,6 +2740,45 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following
 
       <CommunityQuestions posts={allPosts} onOpen={setOpen} />
       <RecentParameters onOpenTank={setTankView} />
+
+      {/* ── Upcoming events (frag swaps & meetups) ── */}
+      <div className="rb-h2" style={{ display: "flex", alignItems: "center" }}><Calendar size={16} color="var(--violet)" /> Events
+        <small style={{ marginLeft: 6 }}>{events.length ? `${events.length} upcoming` : "none yet"}</small>
+        <span className="rb-chip" style={{ marginLeft: "auto", fontSize: 11.5 }} onClick={() => setHostOpen(true)}>+ Host an event</span>
+      </div>
+      {events.length > 0 && (
+        <div className="rb-card" style={{ marginBottom: 18 }}>
+          {events.map((ev) => {
+            const mine = ev.rsvps.find((r) => r.profile_id === uid);
+            return (
+              <div key={ev.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+                <div className="rb-thumb" style={{ background: "linear-gradient(140deg,var(--violet),#0b2b3d)" }}><Calendar size={18} color="#04111a" /></div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="nm">{ev.title} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {new Date(ev.event_date + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></div>
+                  <div className="sub">{ev.location || "location TBA"} · hosted by @{ev.host} · {ev.rsvps.length} going</div>
+                  {ev.details && <div className="sub" style={{ marginTop: 3 }}>{ev.details}</div>}
+                  {ev.rsvps.some((r) => r.bringing) && (
+                    <div className="sub" style={{ marginTop: 4, color: "var(--aqua)" }}>
+                      Bringing: {ev.rsvps.filter((r) => r.bringing).map((r) => `@${r.handle}: ${r.bringing}`).join(" · ")}
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <div className={"rb-chip" + (mine ? " on" : "")} style={{ fontSize: 11.5 }} onClick={() => rsvp(ev)}>
+                      {mine ? "✓ Going" : "I'm going"}
+                    </div>
+                    {mine && (
+                      <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => { const b = prompt("What are you bringing? (frags, gear, snacks…)", mine.bringing || ""); if (b !== null) rsvp(ev, b.trim()); }}>
+                        {mine.bringing ? `Bringing: ${mine.bringing}` : "+ What I'm bringing"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {hostOpen && <HostEventSheet uid={uid} onClose={() => setHostOpen(false)} onCreated={() => { setHostOpen(false); loadEvents(); }} />}
 
       <div className="rb-sec" style={{ display: "flex", alignItems: "center" }}>
         <div style={{ flex: 1 }}><h3>Latest Posts</h3><p>{feedTab === "following" ? "From reefers you follow" : "Everything from the community"}</p></div>
