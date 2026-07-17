@@ -2116,6 +2116,14 @@ function AdminUsers({ state }) {
     setUsers((list) => list.filter((x) => x.id !== u.id));
     setSel(null);
   };
+  const resetAi = async (u) => {
+    if (!confirm(`Reset @${u.handle}'s free AI counters to 0/0?`)) return;
+    const { error } = await supabase.rpc("admin_reset_ai", { target: u.id });
+    if (error) { alert(error.message); return; }
+    if (sel && sel.id === u.id) setSel({ ...sel, deepdive_used: 0, reefid_used: 0 });
+    setDetail((d) => d ? { ...d, deepdive_used: 0, reefid_used: 0 } : d);
+    alert(`@${u.handle} reset — 5 DeepDives and 3 ReefIDs available again.`);
+  };
   const deletePost = async (pid) => {
     if (!confirm("Delete this post?")) return;
     const { error } = await supabase.rpc("admin_delete_post", { pid });
@@ -2207,6 +2215,7 @@ function AdminUsers({ state }) {
                 ) : (
                   <button className="rb-btn ghost" style={{ flex: 1, padding: "9px 0", fontSize: 12.5, color: "#ffb43c", borderColor: "rgba(255,180,60,.4)" }} onClick={() => setStatus(sel, "banned")}>Suspend</button>
                 )}
+                <button className="rb-btn ghost" style={{ flex: 1, padding: "9px 0", fontSize: 12.5, color: "var(--aqua)" }} onClick={() => resetAi(sel)}>Reset AI</button>
                 <button className="rb-btn" style={{ flex: 1, padding: "9px 0", fontSize: 12.5, background: "rgba(255,93,114,.15)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.4)" }} onClick={() => deleteUser(sel)}>Delete user</button>
               </div>
             )}
@@ -2265,6 +2274,7 @@ function AdminOverview() {
     ["Users", t.users, "🧑‍🤝‍🧑"], ["Pro subs", t.pro, "⭐"], ["Est. MRR", "$" + (t.pro * 6.99).toFixed(0), "💵"],
     ["Tanks", t.tanks, "🪣"], ["Readings", t.readings, "🧪"], ["Posts", t.posts, "💬"],
     ["Comments", t.comments, "↩️"], ["Listings", t.listings, "🏪"], ["ReefIDs", t.reefids, "📸"], ["AI msgs", t.aimsgs, "🤖"],
+    ["AI threads", t.threads, "🧵"], ["Events", t.events, "📅"], ["Wishlists", t.wishes, "❤️"], ["Photo queue", t.photoq, "🖼️"],
   ];
   const chart = (key, color, label) => (
     <div className="rb-card rb-chartwrap" style={{ marginTop: 12 }}>
@@ -2298,17 +2308,36 @@ function AdminOverview() {
       {chart("signups", "var(--aqua)", "New signups")}
       {chart("readings", "var(--teal)", "Parameter readings logged")}
       {chart("posts", "var(--violet)", "Community posts")}
+      {chart("aithreads", "#8f5cd6", "AI conversations started")}
     </div>
   );
 }
 
 function AdminContent() {
   const [data, setData] = useState(null);
+  const [evl, setEvl] = useState(null);   // events + listings moderation
   const [err, setErr] = useState("");
-  const load = () => supabase.rpc("admin_recent_content").then(({ data: d, error }) => {
-    if (error) setErr(error.message); else setData(d);
-  });
+  const load = () => {
+    supabase.rpc("admin_recent_content").then(({ data: d, error }) => {
+      if (error) setErr(error.message); else setData(d);
+    });
+    supabase.rpc("admin_recent_events_listings").then(({ data: d, error }) => {
+      if (!error) setEvl(d);
+    });
+  };
   useEffect(() => { load(); }, []);
+  const delEvent = async (id) => {
+    if (!confirm("Delete this event (and its RSVPs)?")) return;
+    const { error } = await supabase.rpc("admin_delete_event", { eid: id });
+    if (error) return alert(error.message);
+    setEvl((d) => ({ ...d, events: d.events.filter((e) => e.id !== id) }));
+  };
+  const delListing = async (id) => {
+    if (!confirm("Delete this listing?")) return;
+    const { error } = await supabase.rpc("admin_delete_listing", { lid: id });
+    if (error) return alert(error.message);
+    setEvl((d) => ({ ...d, listings: d.listings.filter((l) => l.id !== id) }));
+  };
   const delPost = async (id) => {
     if (!confirm("Delete this post?")) return;
     const { error } = await supabase.rpc("admin_delete_post", { pid: id });
@@ -2343,6 +2372,33 @@ function AdminContent() {
       <div className="rb-card" style={{ padding: "4px 14px 10px" }}>
         {data.comments.length === 0 && <div className="rb-empty" style={{ padding: 20 }}>No comments yet.</div>}
         {data.comments.map((c) => row(c, c.body, () => delComment(c.id)))}
+      </div>
+      <div className="rb-h2" style={{ marginTop: 18 }}>📅 Upcoming events <small>{evl ? evl.events.length : "…"}</small></div>
+      <div className="rb-card">
+        {evl && evl.events.length === 0 && <div className="rb-empty" style={{ padding: 16 }}>No upcoming events.</div>}
+        {evl && evl.events.map((e) => (
+          <div key={e.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">{e.title} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {e.date}</span></div>
+              <div className="sub">@{e.host} · {e.location || "no location"} · {e.rsvps} going</div>
+            </div>
+            <span style={{ color: "var(--muted-2)", padding: 8, flex: "none", cursor: "pointer" }} onClick={() => delEvent(e.id)}><Trash2 size={15} /></span>
+          </div>
+        ))}
+      </div>
+
+      <div className="rb-h2" style={{ marginTop: 18 }}>🏪 Recent listings <small>{evl ? evl.listings.length : "…"}</small></div>
+      <div className="rb-card">
+        {evl && evl.listings.length === 0 && <div className="rb-empty" style={{ padding: 16 }}>No listings.</div>}
+        {evl && evl.listings.map((l) => (
+          <div key={l.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">{l.title} <span style={{ color: "var(--aqua)", fontWeight: 600, fontSize: 12 }}>${l.price}</span></div>
+              <div className="sub">@{l.seller} · {fmtDate(new Date(l.created).getTime())}</div>
+            </div>
+            <span style={{ color: "var(--muted-2)", padding: 8, flex: "none", cursor: "pointer" }} onClick={() => delListing(l.id)}><Trash2 size={15} /></span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -2390,11 +2446,22 @@ function AdminMarket() {
 
 function AdminPanel({ state }) {
   const [tab, setTab] = useState("overview");
+  const [photoQ, setPhotoQ] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    supabase.from("species_photo_contributions").select("id", { count: "exact", head: true }).eq("status", "pending")
+      .then(({ count }) => { if (alive && count != null) setPhotoQ(count); });
+    return () => { alive = false; };
+  }, [tab]);
   return (
     <div className="rb-fadein">
       <div className="rb-tabs" style={{ marginTop: 4, flexWrap: "wrap" }}>
         {[["overview", "Overview"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"]].map(([k, l]) => (
-          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)}>{l}</div>
+          <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)} style={{ position: "relative" }}>
+            {l}{k === "photos" && photoQ > 0 && (
+              <span style={{ marginLeft: 6, background: "var(--coral)", color: "#04111a", fontWeight: 800, fontSize: 10, borderRadius: 12, padding: "1px 6px" }}>{photoQ}</span>
+            )}
+          </div>
         ))}
       </div>
       {tab === "overview" && <AdminOverview />}
