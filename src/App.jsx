@@ -2435,6 +2435,17 @@ function computeAchievements(state, derived) {
 }
 
 function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateProfile }) {
+  const [wishlist, setWishlist] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    supabase.from("wishlist").select("species_id").eq("profile_id", state.uid).order("created_at", { ascending: false })
+      .then(({ data }) => { if (alive) setWishlist((data || []).map((w) => REEFPEDIA.find((r) => r.id === w.species_id)).filter(Boolean)); });
+    return () => { alive = false; };
+  }, [state.uid]);
+  const unwish = async (sid) => {
+    await supabase.from("wishlist").delete().eq("profile_id", state.uid).eq("species_id", sid);
+    setWishlist((w) => w.filter((x) => x.id !== sid));
+  };
   const [editOpen, setEditOpen] = useState(false);
   const derived = { corals, fish, myPosts: myPosts.length };
   const achievements = computeAchievements(state, derived);
@@ -2512,6 +2523,20 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateP
       </div>
 
       {/* Activity */}
+      {wishlist.length > 0 && (<>
+        <div className="rb-h2"><Heart size={16} color="var(--coral)" /> Wishlist <small>{wishlist.length}</small></div>
+        <div className="rb-card" style={{ padding: 14 }}>
+          <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+            {wishlist.map((w) => (
+              <div key={w.id} className="rb-chip" style={{ fontSize: 12 }}>
+                {w.name} <span style={{ marginLeft: 6, cursor: "pointer", color: "var(--muted-2)" }} onClick={() => unwish(w.id)}>✕</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted-2)", marginTop: 10 }}>Tap ✕ to remove. Add more from any Reefpedia species page.</div>
+        </div>
+      </>)}
+
       <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Activity <small>{issues.length} flag{issues.length !== 1 ? "s" : ""}</small></div>
       <div className="rb-card">
         {issues.length === 0 && <div className="rb-empty">All parameters in range across your tanks. 🪸</div>}
@@ -3387,9 +3412,24 @@ function PhotoCredit({ item }) {
 function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTank }) {
   const [keepers, setKeepers] = useState(null);
   const [communityPhotos, setCommunityPhotos] = useState([]);
+  const [wish, setWish] = useState(false);
+  const [wishBusy, setWishBusy] = useState(false);
   const [contribBusy, setContribBusy] = useState(false);
   const [contribDone, setContribDone] = useState(false);
   const contribRef = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    if (uid) supabase.from("wishlist").select("id").eq("profile_id", uid).eq("species_id", item.id).maybeSingle()
+      .then(({ data }) => { if (alive) setWish(!!data); });
+    return () => { alive = false; };
+  }, [item.id, uid]);
+  const toggleWish = async () => {
+    if (wishBusy || !uid) return;
+    setWishBusy(true);
+    if (wish) { await supabase.from("wishlist").delete().eq("profile_id", uid).eq("species_id", item.id); setWish(false); }
+    else { await supabase.from("wishlist").insert({ profile_id: uid, species_id: item.id }); setWish(true); }
+    setWishBusy(false);
+  };
   // Contribute a photo straight from the species page — the legit way the library grows.
   const contributePhoto = async (file) => {
     if (!file || !uid) return;
@@ -3543,6 +3583,12 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
           {!isPest && (
             <button className="rb-btn" style={{ flex: 1, padding: 13 }} onClick={() => onAddToTank(item)}>
               <Plus size={16} /> Add to tank
+            </button>
+          )}
+          {!isPest && (
+            <button className="rb-btn" style={{ flex: "none", padding: "13px 15px", background: wish ? "linear-gradient(120deg,var(--coral),#c2405c)" : undefined, color: wish ? "#fff" : undefined, opacity: wishBusy ? .6 : 1 }}
+              onClick={toggleWish} title={wish ? "On your wishlist" : "Add to wishlist"}>
+              <Heart size={16} fill={wish ? "#fff" : "none"} />
             </button>
           )}
           <button className="rb-btn violet" style={{ flex: 1, padding: 13 }} onClick={getTips} disabled={busy}>
@@ -4285,6 +4331,24 @@ function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }
   const matches = q.length < 2 || pick ? [] : REEFPEDIA
     .filter((r) => KIND_CATS[kind].includes(r.cat) && (r.name.toLowerCase().includes(q) || r.sci.toLowerCase().includes(q))).slice(0, 5);
 
+  const [fit, setFit] = useState("");        // AI compatibility result
+  const [fitBusy, setFitBusy] = useState(false);
+  const checkFit = async () => {
+    if (!pick || fitBusy) return;
+    setFitBusy(true); setFit("");
+    try {
+      if (!(await gateAI("deepdive"))) { setFitBusy(false); return; }
+      const t = (tanks || []).find((x) => x.id === tankId);
+      const { data: stock } = await supabase.from("livestock").select("name, kind, status").eq("tank_id", tankId);
+      const alive = (stock || []).filter((s) => (s.status || "alive") === "alive").map((s) => `${s.name} (${s.kind})`).join(", ") || "nothing yet";
+      const SYS = "You are Tidepool Reef's stocking advisor. Answer in 2-3 honest sentences: will this species work in this tank? Consider adult size vs tank volume, temperament vs existing livestock, and bioload. If it's a bad fit, say so plainly and why.";
+      const q = `Species: ${pick.name} (${pick.sci}). Tank: "${t ? t.name : "tank"}", ${t ? t.volume : "?"} gallons. Current livestock: ${alive}.`;
+      const reply = await askReefAI([{ role: "user", content: q }], SYS, "deepdive");
+      setFit(reply || "Couldn't run the check just now.");
+    } catch (e) { setFit("Couldn't run the check just now."); }
+    setFitBusy(false);
+  };
+
   const save = async () => {
     if (!name.trim() || busy) return;
     setBusy(true);
@@ -4323,7 +4387,22 @@ function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }
               <Check size={14} color="var(--good)" /> Linked to <b style={{ color: "var(--text)" }}>{pick.name}</b> in Reefpedia
               <span style={{ marginLeft: "auto", cursor: "pointer", color: "var(--muted-2)" }} onClick={() => setPick(null)}>clear</span>
             </div>
-          ) : matches.length > 0 && (
+          ) : null}
+          {pick && (
+            <div style={{ marginTop: 8 }}>
+              {!fit && (
+                <div className="rb-chip" style={{ borderStyle: "dashed", color: "var(--aqua)", borderColor: "var(--brd-2)", opacity: fitBusy ? .6 : 1 }} onClick={checkFit}>
+                  ✓ {fitBusy ? "Checking fit…" : "Will it work in this tank? (AI check)"}
+                </div>
+              )}
+              {fit && (
+                <div className="rb-card" style={{ padding: "10px 13px", fontSize: 12.5, lineHeight: 1.55, color: "var(--muted)", border: "1px solid var(--brd-2)" }}>
+                  <b style={{ color: "var(--aqua)" }}>Fit check:</b> {fit}
+                </div>
+              )}
+            </div>
+          )}
+          {!pick && matches.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <div style={{ fontSize: 11.5, color: "var(--muted)", marginBottom: 6 }}>Link to a species (helps others find you as a keeper):</div>
               <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
@@ -4377,6 +4456,26 @@ function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
   const [busy, setBusy] = useState(false);
   const [shared, setShared] = useState(false);
   const [sharing, setSharing] = useState(false);
+  // Growth timeline — progress photos over time
+  const [progress, setProgress] = useState([]);
+  const [progBusy, setProgBusy] = useState(false);
+  const progRef = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    if (!String(item.id).startsWith("tmp")) supabase.from("livestock_photos").select("*").eq("livestock_id", item.id).order("created_at")
+      .then(({ data }) => { if (alive) setProgress(data || []); });
+    return () => { alive = false; };
+  }, [item.id]);
+  const addProgressPhoto = async (file) => {
+    if (!file || progBusy) return;
+    setProgBusy(true);
+    const url = await uploadPhoto(file, uid);
+    if (url) {
+      const { data } = await supabase.from("livestock_photos").insert({ livestock_id: item.id, photo_url: url }).select().single();
+      if (data) setProgress((p) => [...p, data]);
+    }
+    setProgBusy(false);
+  };
   const isActive = (item.status || "alive") === "alive";
   const daysKept = item.acquiredAt ? Math.max(0, Math.round((( item.endedAt ? new Date(item.endedAt + "T00:00").getTime() : Date.now()) - new Date(item.acquiredAt + "T00:00").getTime()) / 86400000)) : null;
 
@@ -4420,6 +4519,31 @@ function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
         <Row k="Time in tank" v={daysKept != null ? `${daysKept} day${daysKept === 1 ? "" : "s"}` : null} />
         <Row k="Notes" v={item.note} />
         {!isActive && item.endReason && <Row k="Reason" v={item.endReason} />}
+
+        {/* Growth timeline — progress photos over time */}
+        <div style={{ margin: "14px 0" }}>
+          <div className="rb-h2" style={{ marginTop: 0, marginBottom: 8 }}><Camera size={14} color="var(--aqua)" /> Growth timeline <small>{progress.length ? `${progress.length} photo${progress.length > 1 ? "s" : ""}` : "track it over time"}</small></div>
+          {progress.length > 0 && (
+            <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4, marginBottom: 8 }}>
+              {progress.map((ph) => (
+                <div key={ph.id} style={{ flex: "none", textAlign: "center" }}>
+                  <img src={ph.photo_url} alt="" style={{ height: 92, borderRadius: 10, objectFit: "cover", display: "block" }} />
+                  <div style={{ fontSize: 10.5, color: "var(--muted-2)", marginTop: 3 }}>{fmtDate(new Date(ph.created_at).getTime())}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {isActive && !String(item.id).startsWith("tmp") && (
+            <>
+              <input ref={progRef} type="file" accept="image/*" style={{ display: "none" }}
+                onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) addProgressPhoto(f); e.target.value = ""; }} />
+              <div className="rb-chip" style={{ borderStyle: "dashed", color: "var(--aqua)", borderColor: "var(--brd-2)", opacity: progBusy ? .6 : 1 }}
+                onClick={() => !progBusy && progRef.current && progRef.current.click()}>
+                <Camera size={13} style={{ verticalAlign: -2, marginRight: 5 }} />{progBusy ? "Uploading…" : "Add progress photo"}
+              </div>
+            </>
+          )}
+        </div>
 
         {/* Share to Reefpedia */}
         {item.photo && item.species_id && (
@@ -4470,9 +4594,26 @@ function TankLog({ state, addLogEntry, go }) {
   const [type, setType] = useState("Water Change");
   const [note, setNote] = useState("");
   const types = ["Water Change", "Dosing", "Addition", "Observation"];
-  const typeColor = { "Water Change": "#3fe3ff", Dosing: "#3ce0a3", Addition: "#ffc24d", Observation: "#b06cff", DeepDive: "#b06cff", ReefID: "#2ee6c8", Loss: "#ff5d72", Removal: "#84a8ba" };
+  const typeColor = { "Water Change": "#3fe3ff", Dosing: "#3ce0a3", Addition: "#ffc24d", Observation: "#b06cff", DeepDive: "#b06cff", ReefID: "#2ee6c8", Loss: "#ff5d72", Removal: "#84a8ba", "AI Report": "#8f5cd6" };
   const typeIcon = (t) => t === "DeepDive" ? <Bot size={18} color="#04111a" /> : t === "ReefID" ? <Camera size={18} color="#04111a" /> : <Droplets size={18} color="#04111a" />;
   const openThread = (tid) => { if (!go) return; PENDING_AI_THREAD.id = tid; go("deepdive"); };
+  const [reportBusy, setReportBusy] = useState(false);
+  const weeklyReport = async () => {
+    if (reportBusy) return;
+    setReportBusy(true);
+    try {
+      if (!(await gateAI("deepdive"))) { setReportBusy(false); return; }
+      const wk = Date.now() - 7 * 86400000;
+      const params = state.history.filter((h) => h.date >= wk);
+      const paramsTxt = params.length ? params.map((h) => PARAMS.map((p) => h[p.key] != null ? `${p.label} ${h[p.key]}` : null).filter(Boolean).join(", ")).join(" | ") : "no tests logged";
+      const events = state.log.filter((e) => e.date >= wk && e.type !== "AI Report").map((e) => `${e.type}: ${e.note}`).join(" | ") || "no journal entries";
+      const SYS = "You are Tidepool Reef's weekly tank reporter. Write a concise 3-5 sentence weekly summary of this reef tank: parameter trends and stability, notable events, and one specific thing to watch or do next week. Plain, honest, no fluff.";
+      const q = `Tank "${state.tank ? state.tank.name : ""}" (${state.tank ? state.tank.volume : "?"}g). This week's test readings (oldest→newest): ${paramsTxt}. Journal events: ${events}.`;
+      const reply = await askReefAI([{ role: "user", content: q }], SYS, "deepdive");
+      if (reply) await addLogEntry("AI Report", reply);   // optimistic — appears in the journal immediately
+    } catch (e) { console.error("weekly report failed:", e); }
+    setReportBusy(false);
+  };
   return (
     <div className="rb-fadein">
       <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
@@ -4482,6 +4623,9 @@ function TankLog({ state, addLogEntry, go }) {
         <textarea className="rb-input" rows={2} placeholder="What happened in the tank?" value={note} onChange={(e) => setNote(e.target.value)} />
         <button className="rb-btn" style={{ width: "100%", marginTop: 10, padding: 12 }} disabled={!note.trim()}
           onClick={() => { addLogEntry(type, note.trim()); setNote(""); }}><Plus size={16} /> Add log entry</button>
+        <button className="rb-btn violet" style={{ width: "100%", marginTop: 8, padding: 12, opacity: reportBusy ? .6 : 1 }} onClick={weeklyReport} disabled={reportBusy}>
+          <Sparkles size={15} /> {reportBusy ? "Writing your week…" : "AI weekly report"}
+        </button>
       </div>
       <div className="rb-h2"><Notebook size={16} color="var(--aqua)" /> Journal <small>{state.log.length} entries</small></div>
       <div className="rb-card">
