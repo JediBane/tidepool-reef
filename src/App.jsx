@@ -4796,6 +4796,9 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     setThreadId(id); setHistOpen(false);
   };
   const newChat = () => { setMsgs([]); setThreadId(null); };
+  // Journal auto-log preference (per device). Default on.
+  const [journalLog, setJournalLog] = useState(() => { try { return localStorage.getItem("tr:dd-journal") !== "0"; } catch (e) { return true; } });
+  const toggleJournalLog = () => setJournalLog((v) => { const n = !v; try { localStorage.setItem("tr:dd-journal", n ? "1" : "0"); } catch (e) {} return n; });
   const deleteThread = async (id) => {
     await supabase.from("ai_threads").delete().eq("id", id);
     setThreads((ts) => ts.filter((t) => t.id !== id));
@@ -4868,7 +4871,7 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
       if (tid) persist(tid, "assistant", answer, null);
       // Journal the consultation: one entry per NEW conversation, linked to the thread
       // so it can be reopened from the journal later.
-      if (tid && isNewThread) {
+      if (tid && isNewThread && journalLog) {
         const topic = (display || question).replace(/\s+/g, " ").trim().slice(0, 70);
         const excerpt = answer.replace(/\s+/g, " ").trim().slice(0, 170);
         supabase.from("tank_log").insert({
@@ -4954,6 +4957,10 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
         <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
           <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => !busy && diagnose()}>🔍 Re-diagnose {t.name}</div>
           <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={newChat}>✨ New chat</div>
+          <div className={"rb-chip" + (journalLog ? " on" : "")} style={{ fontSize: 11.5 }} onClick={toggleJournalLog}
+            title="Log each new conversation to the tank journal">
+            <Notebook size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{journalLog ? "Journaling on" : "Journaling off"}
+          </div>
           {threads.length > 0 && <div className="rb-chip" style={{ fontSize: 11.5 }} onClick={() => setHistOpen(true)}>🕐 History</div>}
         </div>
       )}
