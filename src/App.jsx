@@ -4464,8 +4464,22 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) 
   const [followMsgs, setFollowMsgs] = useState([]);   // follow-up Q&A after an ID
   const [followInput, setFollowInput] = useState("");
   const [followBusy, setFollowBusy] = useState(false);
+  const [journalSaved, setJournalSaved] = useState(false);
+  const [journalBusy, setJournalBusy] = useState(false);
   const fileRef = useRef(null);
   const followScroll = useRef(null);
+  // Opt-in journal save — heavy scanners shouldn't flood the journal with every ID.
+  const saveIdToJournal = async () => {
+    if (!card || !tank || journalBusy || journalSaved) return;
+    setJournalBusy(true);
+    const { error } = await supabase.from("tank_log").insert({
+      tank_id: tank.id, entry_type: "ReefID",
+      note: `Identified ${card.common}${card.scientific ? ` (${card.scientific})` : ""} — ${card.confidence || "?"} confidence, ${card.difficulty || "?"} care.${card.note ? " " + card.note : ""}`,
+    });
+    if (error) { console.error("journal save failed:", error.message); alert("Couldn't save to journal — try again."); }
+    else setJournalSaved(true);
+    setJournalBusy(false);
+  };
   useEffect(() => { if (followScroll.current) followScroll.current.scrollTop = followScroll.current.scrollHeight; }, [followMsgs, followBusy]);
 
   // Snapshot of the user's active tank, for compatibility checks.
@@ -4518,16 +4532,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) 
         const start = jsonStr.indexOf("{"), end = jsonStr.lastIndexOf("}");
         if (start !== -1 && end !== -1) parsed = JSON.parse(jsonStr.slice(start, end + 1));
       } catch (e) { parsed = null; }
-      if (parsed && parsed.common) {
-        setCard(parsed);
-        // Journal the identification to the active tank (if any) for look-back over time.
-        if (tank && parsed.common !== "Unclear") {
-          supabase.from("tank_log").insert({
-            tank_id: tank.id, entry_type: "ReefID",
-            note: `Identified ${parsed.common}${parsed.scientific ? ` (${parsed.scientific})` : ""} — ${parsed.confidence || "?"} confidence, ${parsed.difficulty || "?"} care.${parsed.note ? " " + parsed.note : ""}`,
-          }).then(() => {});
-        }
-      }
+      if (parsed && parsed.common) { setCard(parsed); setJournalSaved(false); }
       else setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
     setBusy(false);
@@ -4644,6 +4649,19 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) 
                 </div>
               )}
               {card.note && <div style={{ fontSize: 12.5, color: "var(--muted)", fontStyle: "italic", lineHeight: 1.45, borderTop: "1px solid rgba(255,255,255,.06)", paddingTop: 10 }}>{card.note}</div>}
+
+              {/* Save to journal — opt-in, so heavy scanning doesn't flood it */}
+              {tank && card.common !== "Unclear" && (
+                <div style={{ marginTop: 14 }}>
+                  {journalSaved ? (
+                    <div style={{ fontSize: 13, color: "var(--good)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}><Check size={14} /> Saved to {tank.name}'s journal</div>
+                  ) : (
+                    <div className="rb-chip" style={{ borderStyle: "dashed", color: "var(--aqua)", borderColor: "var(--brd-2)", opacity: journalBusy ? .6 : 1 }} onClick={saveIdToJournal}>
+                      <Notebook size={13} style={{ verticalAlign: -2, marginRight: 5 }} />{journalBusy ? "Saving…" : `Save to ${tank.name}'s journal`}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Add to tank */}
               {tanks && tanks.length > 0 && card.common !== "Unclear" && (
