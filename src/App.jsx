@@ -497,7 +497,7 @@ async function fetchTankChildren(tankId) {
       status: r.status || "alive", endedAt: r.ended_at, endReason: r.end_reason || "",
     })),
     tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
-    log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note })),
+    log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note, aiThread: r.ai_thread_id || null })),
   };
 }
 
@@ -593,6 +593,8 @@ const AI_GATE = { check: null, sync: null };   // main component installs the ch
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
 const AI_GATE_STATE = { serverCounts: false };
+// Journal → DeepDive handoff: tap a DeepDive journal entry to reopen that conversation.
+const PENDING_AI_THREAD = { id: null };
 
 /* Returns true if the call may proceed. Opens the upgrade sheet + returns false otherwise. */
 async function gateAI(kind) {
@@ -1653,7 +1655,7 @@ function TidepoolReef() {
 
         {/* views */}
         {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank }} />}
-        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid: state.uid, profile: state.profile }} />}
+        {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, go, uid: state.uid, profile: state.profile }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} uid={session.user.id} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
         {view === "admin" && <AdminPanel state={state} />}
@@ -1916,7 +1918,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank 
 }
 
 /* ---------------- Log (parameters + journal + livestock) ---------------- */
-function LogView({ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, uid, profile }) {
+function LogView({ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, go, uid, profile }) {
   const [tab, setTab] = useState("params");
   return (
     <div className="rb-fadein">
@@ -1927,7 +1929,7 @@ function LogView({ state, latest, sel, setSel, addLivestock, endLivestock, addLo
         ))}
       </div>
       {tab === "params" && <Tracker {...{ state, latest, sel, setSel, addLivestock }} hideLivestock />}
-      {tab === "journal" && <TankLog {...{ state, addLogEntry }} />}
+      {tab === "journal" && <TankLog {...{ state, addLogEntry, go }} />}
       {tab === "livestock" && <Tracker {...{ state, latest, sel, setSel, addLivestock, endLivestock, uid, profile }} livestockOnly />}
     </div>
   );
@@ -4400,11 +4402,13 @@ function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
 }
 
 /* ---------------- Tank Log ---------------- */
-function TankLog({ state, addLogEntry }) {
+function TankLog({ state, addLogEntry, go }) {
   const [type, setType] = useState("Water Change");
   const [note, setNote] = useState("");
   const types = ["Water Change", "Dosing", "Addition", "Observation"];
-  const typeColor = { "Water Change": "#3fe3ff", Dosing: "#3ce0a3", Addition: "#ffc24d", Observation: "#b06cff" };
+  const typeColor = { "Water Change": "#3fe3ff", Dosing: "#3ce0a3", Addition: "#ffc24d", Observation: "#b06cff", DeepDive: "#b06cff", ReefID: "#2ee6c8", Loss: "#ff5d72", Removal: "#84a8ba" };
+  const typeIcon = (t) => t === "DeepDive" ? <Bot size={18} color="#04111a" /> : t === "ReefID" ? <Camera size={18} color="#04111a" /> : <Droplets size={18} color="#04111a" />;
+  const openThread = (tid) => { if (!go) return; PENDING_AI_THREAD.id = tid; go("deepdive"); };
   return (
     <div className="rb-fadein">
       <div className="rb-card" style={{ padding: 16, marginTop: 6 }}>
@@ -4419,9 +4423,14 @@ function TankLog({ state, addLogEntry }) {
       <div className="rb-card">
         {state.log.length === 0 && <div className="rb-empty">No journal entries yet — log your first water change or observation above.</div>}
         {state.log.map((e) => (
-          <div key={e.id} className="rb-li" style={{ alignItems: "flex-start" }}>
-            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${typeColor[e.type] || "#3fe3ff"},#0b2b3d)` }}><Droplets size={18} color="#04111a" /></div>
-            <div><div className="nm">{e.type} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {fmtDate(e.date)}</span></div><div className="sub" style={{ lineHeight: 1.45 }}>{e.note}</div></div>
+          <div key={e.id} className="rb-li" style={{ alignItems: "flex-start", cursor: e.aiThread ? "pointer" : "default" }}
+            onClick={() => e.aiThread && openThread(e.aiThread)}>
+            <div className="rb-thumb" style={{ background: `linear-gradient(140deg,${typeColor[e.type] || "#3fe3ff"},#0b2b3d)` }}>{typeIcon(e.type)}</div>
+            <div style={{ flex: 1 }}>
+              <div className="nm">{e.type} <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}>· {fmtDate(e.date)}</span></div>
+              <div className="sub" style={{ lineHeight: 1.45 }}>{e.note}</div>
+              {e.aiThread && <div style={{ fontSize: 11.5, color: "var(--aqua)", marginTop: 4 }}>Tap to reopen this conversation ›</div>}
+            </div>
           </div>
         ))}
       </div>
@@ -4509,7 +4518,16 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) 
         const start = jsonStr.indexOf("{"), end = jsonStr.lastIndexOf("}");
         if (start !== -1 && end !== -1) parsed = JSON.parse(jsonStr.slice(start, end + 1));
       } catch (e) { parsed = null; }
-      if (parsed && parsed.common) setCard(parsed);
+      if (parsed && parsed.common) {
+        setCard(parsed);
+        // Journal the identification to the active tank (if any) for look-back over time.
+        if (tank && parsed.common !== "Unclear") {
+          supabase.from("tank_log").insert({
+            tank_id: tank.id, entry_type: "ReefID",
+            note: `Identified ${parsed.common}${parsed.scientific ? ` (${parsed.scientific})` : ""} — ${parsed.confidence || "?"} confidence, ${parsed.difficulty || "?"} care.${parsed.note ? " " + parsed.note : ""}`,
+          }).then(() => {});
+        }
+      }
       else setResult(txt || "Couldn't identify that one — try a clearer, closer shot.");
     } catch (e) { setResult("Reef ID error: " + (e.message || "connection failed") + ". Try again, or use a smaller/clearer photo."); }
     setBusy(false);
@@ -4748,6 +4766,10 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     setThreads(data || []);
   };
   useEffect(() => { loadThreads(); }, [uid]);
+  // If a journal entry sent us here, open that saved conversation.
+  useEffect(() => {
+    if (PENDING_AI_THREAD.id) { const t = PENDING_AI_THREAD.id; PENDING_AI_THREAD.id = null; openThread(t); }
+  }, []);
 
   // Resume a saved conversation.
   const openThread = async (id) => {
@@ -4807,6 +4829,7 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     try {
       // Gate FIRST — don't create/persist a thread for a message that gets paywalled.
       if (!(await gateAI("deepdive"))) { setBusy(false); return; }
+      const isNewThread = !threadId;
       // Persist the user turn (create the thread on first message). Photos are kept
       // in-session only — data URLs are far too large to store per-message in the DB.
       const tid = await ensureThread(display || question);
@@ -4825,6 +4848,16 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
       const answer = reply || "Hmm, I couldn't generate a response just now.";
       setMsgs((m) => [...m, { role: "assistant", content: answer }]);
       if (tid) persist(tid, "assistant", answer, null);
+      // Journal the consultation: one entry per NEW conversation, linked to the thread
+      // so it can be reopened from the journal later.
+      if (tid && isNewThread) {
+        const topic = (display || question).replace(/\s+/g, " ").trim().slice(0, 70);
+        const excerpt = answer.replace(/\s+/g, " ").trim().slice(0, 170);
+        supabase.from("tank_log").insert({
+          tank_id: state.tankId, entry_type: "DeepDive", ai_thread_id: tid,
+          note: `Asked: "${topic}" — ${excerpt}${answer.length > 170 ? "…" : ""}`,
+        }).then(() => {});
+      }
     } catch (e) {
       if (e.limitReached && onUpgrade) { setMsgs((m) => m.slice(0, -1)); onUpgrade(); setBusy(false); return; }
       setMsgs((m) => [...m, { role: "assistant", content: "DeepDive error: " + (e.message || "connection failed") + " — try again in a moment." }]); }
