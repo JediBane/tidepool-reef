@@ -1302,12 +1302,31 @@ function TidepoolReef() {
 
   const allListings = state.listings;
   const allPosts = state.posts;
-  const issues = state ? PARAMS.filter((p) => {
-    const lv = lastVal(state.history, p.key);
-    if (!lv) return false;
-    const st = statusOf(p, lv.v);
-    return st === "warn" || st === "bad";
-  }) : [];
+  const issues = state ? (() => {
+    const out = [];
+    for (const p of PARAMS) {
+      const lv = lastVal(state.history, p.key);
+      if (!lv) continue;
+      const st = statusOf(p, lv.v);
+      if (st === "warn" || st === "bad") { out.push(p); continue; }
+      // Drift detection: in-range now, but trending out. Least-squares slope over
+      // recent readings; flag if projected outside ideal within ~4 weeks.
+      const cutoff = Date.now() - 45 * 86400000;
+      const pts = state.history.filter((h) => h[p.key] != null && h.date >= cutoff).map((h) => ({ t: h.date, v: h[p.key] }));
+      if (pts.length < 3) continue;
+      const wk = 7 * 86400000;
+      const mx = pts.reduce((a, b) => a + b.t, 0) / pts.length, my = pts.reduce((a, b) => a + b.v, 0) / pts.length;
+      const slope = pts.reduce((a, b) => a + (b.t - mx) * (b.v - my), 0) / (pts.reduce((a, b) => a + (b.t - mx) ** 2, 0) || 1) * wk; // units per week
+      if (!Number.isFinite(slope) || Math.abs(slope) < 1e-6) continue;
+      const [lo, hi] = p.ideal;
+      const last = pts[pts.length - 1].v;
+      const weeksToExit = slope > 0 ? (hi - last) / slope : (lo - last) / slope;
+      if (weeksToExit > 0 && weeksToExit <= 4) {
+        out.push({ ...p, _drift: true, _driftMsg: `${slope > 0 ? "rising" : "falling"} ${Math.abs(slope).toFixed(p.dec)} ${p.unit}/wk — out of range in ~${Math.max(1, Math.round(weeksToExit))} wk` });
+      }
+    }
+    return out;
+  })() : [];
   const corals = state.livestock.filter((l) => l.type === "Coral").length;
   const fish = state.livestock.filter((l) => l.type === "Fish").length;
 
@@ -1868,17 +1887,45 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank 
         <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Needs attention <small>{issues.length} flag{issues.length > 1 ? "s" : ""}</small></div>
         <div className="rb-card">
           {issues.map((p) => {
-            const st = statusOf(p, (lastVal(state.history, p.key) || {}).v);
+            const st = p._drift ? "warn" : statusOf(p, (lastVal(state.history, p.key) || {}).v);
             return (
               <div key={p.key} className="rb-li" onClick={() => go("log")} style={{ cursor: "pointer" }}>
-                <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}><Droplets size={20} color="#04111a" /></div>
-                <div><div className="nm">{p.label} drifting</div><div className="sub">{(lastVal(state.history, p.key) || {}).v} {p.unit} · target {p.ideal[0]}–{p.ideal[1]}</div></div>
+                <div className="rb-thumb" style={{ background: `linear-gradient(140deg,var(--${st === "bad" ? "bad" : "warn"}),#0b2b3d)` }}>{p._drift ? <TrendingUp size={20} color="#04111a" /> : <Droplets size={20} color="#04111a" />}</div>
+                <div><div className="nm">{p.label} {p._drift ? "trending" : "drifting"}</div><div className="sub">{p._drift ? p._driftMsg : `${(lastVal(state.history, p.key) || {}).v} ${p.unit} · target ${p.ideal[0]}–${p.ideal[1]}`}</div></div>
                 <ChevronRight size={18} color="var(--muted)" style={{ marginLeft: "auto" }} />
               </div>
             );
           })}
         </div>
       </>)}
+
+      {(() => {
+        // Livestock anniversaries — today + coming up this week (1+ years).
+        const now = new Date(); const today = [now.getMonth(), now.getDate()];
+        const soonMs = 7 * 86400000;
+        const annivs = state.livestock.filter((l) => (l.status || "alive") === "alive" && l.acquiredAt).map((l) => {
+          const d = new Date(l.acquiredAt + "T00:00");
+          const yrs = now.getFullYear() - d.getFullYear();
+          if (yrs < 1) return null;
+          const thisYear = new Date(now.getFullYear(), d.getMonth(), d.getDate());
+          const diff = thisYear.getTime() - now.setHours(0,0,0,0);
+          if (d.getMonth() === today[0] && d.getDate() === today[1]) return { l, yrs, today: true };
+          if (diff > 0 && diff <= soonMs) return { l, yrs, days: Math.ceil(diff / 86400000) };
+          return null;
+        }).filter(Boolean);
+        if (!annivs.length) return null;
+        return (
+          <div className="rb-card" style={{ padding: "13px 16px", marginBottom: 14, border: "1px solid rgba(255,194,77,.35)", background: "rgba(255,194,77,.06)" }}>
+            {annivs.map(({ l, yrs, today: isToday, days }) => (
+              <div key={l.id} style={{ fontSize: 13.5, lineHeight: 1.7 }}>
+                🎉 {isToday
+                  ? <><b>{yrs} year{yrs > 1 ? "s" : ""}</b> with your <b>{l.name}</b> today!</>
+                  : <><b>{l.name}</b> hits <b>{yrs} year{yrs > 1 ? "s" : ""}</b> in {days} day{days > 1 ? "s" : ""}</>}
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       <div className="rb-cols2">
         <div>
@@ -4146,6 +4193,23 @@ function Tracker({ state, latest, sel, setSel, addLivestock, endLivestock, hideL
         const archived = state.livestock.filter((l) => (l.status || "alive") !== "alive");
         return (<>
         <div className="rb-h2"><Fish size={16} color="var(--teal)" /> Livestock <small>{active.length} in tank</small></div>
+        {(() => {
+          const spent = state.livestock.filter((l) => l.price != null && l.price !== "").reduce((a, l) => a + Number(l.price || 0), 0);
+          if (!spent) return null;
+          const by = {};
+          state.livestock.forEach((l) => { if (l.price) by[l.type] = (by[l.type] || 0) + Number(l.price); });
+          return (
+            <div className="rb-card" style={{ padding: "13px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 11, color: "var(--muted)", letterSpacing: .6 }}>INVESTED IN {String((state.tank && state.tank.name) || "THIS TANK").toUpperCase()}</div>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24, marginTop: 2, color: "var(--aqua)" }}>${spent.toLocaleString()}</div>
+              </div>
+              <div style={{ fontSize: 11.5, color: "var(--muted)", textAlign: "right", lineHeight: 1.6 }}>
+                {Object.entries(by).map(([k, v]) => <div key={k}>{k}s · ${Number(v).toLocaleString()}</div>)}
+              </div>
+            </div>
+          );
+        })()}
         <button className="rb-btn" style={{ width: "100%", marginBottom: 10, padding: 12 }} onClick={() => setAddOpen(true)}>
           <Plus size={16} /> Add livestock
         </button>
