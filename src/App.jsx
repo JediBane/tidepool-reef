@@ -3792,7 +3792,8 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
     setContribBusy(true);
     try {
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-      const path = `contrib/${item.id}/${uid}-${Date.now()}.${ext}`;
+      // Storage policy requires the first folder to be the uploader's uid.
+      const path = `${uid}/contrib-${item.id}-${Date.now()}.${ext}`;
       const up = await supabase.storage.from("photos").upload(path, file, { upsert: false });
       if (up.error) throw up.error;
       const { data: pub } = supabase.storage.from("photos").getPublicUrl(path);
