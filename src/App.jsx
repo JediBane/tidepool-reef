@@ -3767,6 +3767,7 @@ const FISH_FAMILIES = [
   ["Angels & Butterflies", /angelfish|centropyge|pygoplites|butterfly|chelmon/i],
   ["Cardinals, Damsels & Chromis", /cardinal|damsel|chromis|chrysiptera/i],
   ["Firefish & Dartfish", /firefish|dartfish|nemateleotris/i],
+  ["Hawkfish, Bettas & Oddballs", /hawkfish|oxycirrhites|neocirrhites|betta|calloplesiops|triggerfish|trigger|xanthichthys|filefish|hogfish|bodianus|rabbitfish|puffer|boxfish|toby/i],
 ];
 function fishFamily(item) {
   const hay = item.name + " " + item.sci;
@@ -3811,7 +3812,8 @@ function coralGroup(item, cat) {
 // Representative species id per group (hand-picked so tiles look intentional).
 const GROUP_ICON = {
   "Clownfish": "f40", "Tangs & Surgeonfish": "f6", "Wrasses": "f48", "Gobies, Blennies & Dragonets": "f44",
-  "Anthias, Basslets & Dottybacks": "f52", "Angels & Butterflies": "f42", "Cardinals, Damsels & Chromis": "f73", "Firefish & Dartfish": "f54",
+  "Anthias, Basslets & Dottybacks": "f52", "Angels & Butterflies": "f7", "Cardinals, Damsels & Chromis": "f73", "Firefish & Dartfish": "f54",
+  "Hawkfish, Bettas & Oddballs": "f41",
   "Acropora": "s2", "Montipora": "s4", "Birdsnest & Stylo": "s6", "Pocillopora": "s8", "Encrusting SPS": "s18",
   "Euphyllia (Hammer/Torch/Frog)": "l2", "Brains": "l10", "Acans & Micromussa": "l5", "Chalices & Favites": "l8",
   "Plates & Fungia": "l12", "Bubble, Elegance & Fleshy": "l14", "Flowerpot & Star": "l16", "Non-Photosynthetic": "l15", "Candy Cane & Scroll": "l6",
