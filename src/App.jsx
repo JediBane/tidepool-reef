@@ -623,6 +623,17 @@ const AI_GATE = { check: null, sync: null };   // main component installs the ch
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
 try { document.documentElement.dataset.theme = localStorage.getItem("tr:theme") || "actinic"; } catch (e) {}
+// Strip markdown for plain-text journal notes (headings, bold, italics, list markers).
+function stripMd(s) {
+  return String(s || "")
+    .replace(/^#{1,6}\s*/gm, "")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .replace(/\*([^*]*)\*/g, "$1")
+    .replace(/^[-*]\s+/gm, "")
+    .replace(/`{1,3}/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").replace(/\.0$/, "");
 function LegalSheet({ doc, onClose }) {
   const sections = doc === "privacy" ? PRIVACY : TERMS;
@@ -5063,10 +5074,11 @@ function TankLog({ state, addLogEntry, go }) {
       const params = state.history.filter((h) => h.date >= wk);
       const paramsTxt = params.length ? params.map((h) => PARAMS.map((p) => h[p.key] != null ? `${p.label} ${h[p.key]}` : null).filter(Boolean).join(", ")).join(" | ") : "no tests logged";
       const events = state.log.filter((e) => e.date >= wk && e.type !== "AI Report").map((e) => `${e.type}: ${e.note}`).join(" | ") || "no journal entries";
-      const SYS = "You are Tidepool Reef's weekly tank reporter. Write a concise 3-5 sentence weekly summary of this reef tank: parameter trends and stability, notable events, and one specific thing to watch or do next week. Plain, honest, no fluff.";
+      const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+      const SYS = `You are Tidepool Reef's weekly tank reporter. Today's date is ${today}; the report covers the past 7 days. Start with "Week of ${today}:" then a concise 3-5 sentence summary: parameter trends and stability, notable events, and one specific thing to watch or do next week. Plain sentences only — NO markdown, NO headings, NO asterisks. Honest, no fluff.`;
       const q = `Tank "${state.tank ? state.tank.name : ""}" (${state.tank ? state.tank.volume : "?"}g). This week's test readings (oldest→newest): ${paramsTxt}. Journal events: ${events}.`;
       const reply = await askReefAI([{ role: "user", content: q }], SYS, "deepdive");
-      if (reply) await addLogEntry("AI Report", reply);   // optimistic — appears in the journal immediately
+      if (reply) await addLogEntry("AI Report", stripMd(reply));   // optimistic — appears in the journal immediately
     } catch (e) { console.error("weekly report failed:", e); }
     setReportBusy(false);
   };
@@ -5461,7 +5473,7 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     if (journaled[th.id]) return;
     // Excerpt from the thread's first assistant reply
     const { data: firstA } = await supabase.from("ai_messages").select("content").eq("thread_id", th.id).eq("role", "assistant").order("created_at").limit(1).maybeSingle();
-    const excerpt = firstA && firstA.content ? firstA.content.replace(/\s+/g, " ").trim().slice(0, 170) : "";
+    const excerpt = firstA && firstA.content ? stripMd(firstA.content).slice(0, 170) : "";
     const { error } = await supabase.from("tank_log").insert({
       tank_id: th.tank_id || state.tankId, entry_type: "DeepDive", ai_thread_id: th.id,
       note: `Asked: "${(th.title || "Chat").slice(0, 70)}"${excerpt ? ` — ${excerpt}…` : ""}`,
@@ -5557,8 +5569,8 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
       // Journal the consultation: one entry per NEW conversation, linked to the thread
       // so it can be reopened from the journal later.
       if (tid && isNewThread && journalLog) {
-        const topic = (display || question).replace(/\s+/g, " ").trim().slice(0, 70);
-        const excerpt = answer.replace(/\s+/g, " ").trim().slice(0, 170);
+        const topic = stripMd(display || question).slice(0, 70);
+        const excerpt = stripMd(answer).slice(0, 170);
         supabase.from("tank_log").insert({
           tank_id: state.tankId, entry_type: "DeepDive", ai_thread_id: tid,
           note: `Asked: "${topic}" — ${excerpt}${answer.length > 170 ? "…" : ""}`,
