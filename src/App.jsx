@@ -1413,7 +1413,7 @@ function TidepoolReef() {
   }
   // Terms gate: block until the current legal version is accepted (existing users + version bumps).
   if (state.profile && state.profile.tos_version !== TOS_VERSION) {
-    return <TermsGate uid={state.uid} onAccepted={refresh} />;
+    return (<div className="rb-root"><style>{STYLES}</style><TermsGate uid={state.uid} onAccepted={refresh} /></div>);
   }
   if (!state.tanks.length) return <Onboarding profile={state.profile} onDone={refresh} />;
   // First-run nudge: right after creating their first tank, open the Log sheet so the
