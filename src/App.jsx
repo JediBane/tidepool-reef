@@ -8,8 +8,7 @@ import {
   FlaskConical, Notebook, Camera, Bot, MessageCircle, Receipt, Settings, MapPin, Heart,
   ChevronRight, ChevronLeft, Check, RefreshCw, Sparkles, TrendingUp, Send, Clock, Tag, Plus, Calendar,
   Award, Image as ImageIcon, Search, PenSquare, Upload, Beaker, User, Users, SlidersHorizontal,
-  Trash2,
-} from "lucide-react";
+  Trash2,, Wrench } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
 import { TERMS, PRIVACY, TOS_VERSION } from "./legal.js";
@@ -510,11 +509,12 @@ async function fetchThreads(uid) {
 }
 
 async function fetchTankChildren(tankId) {
-  const [pr, lr, tr, gr] = await Promise.all([
+  const [pr, lr, tr, gr, er] = await Promise.all([
     supabase.from("parameters").select("*").eq("tank_id", tankId).order("measured_at"),
     supabase.from("livestock").select("*").eq("tank_id", tankId).order("created_at"),
     supabase.from("tasks").select("*").eq("tank_id", tankId),
     supabase.from("tank_log").select("*").eq("tank_id", tankId).order("created_at", { ascending: false }),
+    supabase.from("equipment").select("*").eq("tank_id", tankId).order("category"),
   ]);
   return {
     history: (pr.data || []).map((r) => ({
@@ -528,6 +528,7 @@ async function fetchTankChildren(tankId) {
     })),
     tasks: (tr.data || []).map((r) => ({ id: r.id, name: r.name, every: r.every, due: new Date(r.due_at).getTime() })),
     log: (gr.data || []).map((r) => ({ id: r.id, date: new Date(r.created_at).getTime(), type: r.entry_type, note: r.note, aiThread: r.ai_thread_id || null })),
+    equipment: er.data || [],
   };
 }
 
@@ -623,6 +624,13 @@ const AI_GATE = { check: null, sync: null };   // main component installs the ch
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
 try { document.documentElement.dataset.theme = localStorage.getItem("tr:theme") || "actinic"; } catch (e) {}
+// One-line equipment summary for AI prompts.
+function equipLine(equipment) {
+  return (equipment || []).length
+    ? equipment.map((e) => `${e.category}: ${e.name}${e.details ? " (" + e.details + ")" : ""}`).join("; ")
+    : "no equipment logged";
+}
+
 // Strip markdown for plain-text journal notes (headings, bold, italics, list markers).
 function stripMd(s) {
   return String(s || "")
@@ -1528,6 +1536,17 @@ function TidepoolReef() {
     }
     award(5);
   };
+  const addEquipment = async (category, name, details) => {
+    const { data, error } = await supabase.from("equipment").insert({ tank_id: state.tankId, category, name, details }).select().single();
+    if (error) { console.error("addEquipment:", error.message); alert("Couldn't add that — try again."); return; }
+    setState((s) => ({ ...s, equipment: [...(s.equipment || []), data].sort((a, b) => a.category.localeCompare(b.category)) }));
+  };
+  const deleteEquipment = async (id) => {
+    const prev = state.equipment;
+    setState((s) => ({ ...s, equipment: (s.equipment || []).filter((e) => e.id !== id) }));
+    const { error } = await supabase.from("equipment").delete().eq("id", id);
+    if (error) { console.error("deleteEquipment:", error.message); setState((s) => ({ ...s, equipment: prev })); }
+  };
   const addLivestock = async (kind, name, note, speciesId, detail = {}) => {
     const c = KIND_COLOR[kind] || "#3fe3ff";
     const prev = state.livestock;
@@ -1832,7 +1851,7 @@ function TidepoolReef() {
         })()}
 
         {/* views */}
-        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank }} />}
+        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, go, uid: state.uid, profile: state.profile }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} uid={session.user.id} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
@@ -1841,7 +1860,7 @@ function TidepoolReef() {
         {view === "library" && <Library {...{ libCat, setLibCat, counts: state.speciesCounts, onAddToTank: setAddItem, openItem: (it) => { setLibItem(it); setSheet("libDetail"); } }} />}
         {view === "shop" && <Shop {...{ allListings, cat, setCat, uid: state.uid, onMessage: (who, prefill) => { setMsgTo({ ...who, prefill }); setSheet("message"); } }} />}
         {view === "tasks" && <Tasks {...{ state, latest, completeTask, addTask, updateTask, deleteTask, switchTank }} />}
-        {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} tanks={state.tanks} addTo={addLivestockTo} tank={state.tank} history={state.history} livestock={state.livestock} />}
+        {view === "reefid" && <ReefID profile={state.profile} onUpgrade={() => setUpgradeOpen(true)} tanks={state.tanks} addTo={addLivestockTo} tank={state.tank} history={state.history} livestock={state.livestock} equipment={state.equipment} />}
         {view === "notifications" && <Notifications uid={session.user.id} />}
         {view === "messages" && <Messages {...{ state, sendMessage }} />}
         {view === "purchases" && <Purchases />}
@@ -1961,7 +1980,59 @@ function TankSwitcher({ tanks, tankId, switchTank, createTank }) {
 }
 
 /* ---------------- Tank (home) ---------------- */
-function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank }) {
+const EQUIP_CATS = ["Light", "Flow", "Filtration", "Skimmer", "Heater/Chiller", "ATO", "Dosing", "Controller", "Reactor", "Other"];
+function EquipmentSheet({ equipment, onClose, onAdd, onDelete }) {
+  const [cat, setCat] = useState("Light");
+  const [name, setName] = useState("");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true);
+    await onAdd(cat, name.trim(), details.trim() || null);
+    setName(""); setDetails("");
+    setBusy(false);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Tank equipment</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+          The AI uses this — lighting for coral placement, flow for SPS advice, filtration for bioload calls. Details like schedule or intensity make it smarter.
+        </div>
+        {equipment.length > 0 && (
+          <div className="rb-card" style={{ marginBottom: 14 }}>
+            {equipment.map((e) => (
+              <div key={e.id} className="rb-li" style={{ alignItems: "flex-start" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="nm">{e.name} <span className="rb-badge" style={{ fontSize: 10, marginLeft: 6, background: "rgba(255,194,77,.12)", color: "var(--gold)", border: "1px solid rgba(255,194,77,.3)" }}>{e.category}</span></div>
+                  {e.details && <div className="sub" style={{ marginTop: 2 }}>{e.details}</div>}
+                </div>
+                <span style={{ color: "var(--muted-2)", padding: 8, flex: "none", cursor: "pointer" }}
+                  onClick={() => { if (confirm(`Remove ${e.name}?`)) onDelete(e.id); }}><Trash2 size={15} /></span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="rb-field"><label>Type</label>
+          <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+            {EQUIP_CATS.map((c) => <div key={c} className={"rb-chip" + (cat === c ? " on" : "")} style={{ fontSize: 12 }} onClick={() => setCat(c)}>{c}</div>)}
+          </div>
+        </div>
+        <div className="rb-field"><label>What is it?</label>
+          <input className="rb-input" placeholder={cat === "Light" ? "e.g. AI Prime 16HD ×2" : cat === "Flow" ? "e.g. Nero 5 powerhead" : "e.g. brand + model"} value={name} onChange={(e) => setName(e.target.value)} /></div>
+        <div className="rb-field"><label>Details / settings (optional — the AI reads this)</label>
+          <input className="rb-input" placeholder={cat === "Light" ? "e.g. 60% blues, 8hr photoperiod" : cat === "Flow" ? "e.g. 40% pulse mode, aimed across rockwork" : "e.g. schedule, capacity, media"} value={details} onChange={(e) => setDetails(e.target.value)} /></div>
+        <button className="rb-btn" style={{ width: "100%", padding: 12, marginTop: 4 }} disabled={!name.trim() || busy} onClick={save}>
+          <Plus size={15} /> {busy ? "Adding…" : "Add equipment"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment }) {
+  const [equipOpen, setEquipOpen] = useState(false);
   const t = state.tank;
   // Health from each parameter's LAST KNOWN value, weighted by real reef impact
   // (temp/salinity/alk swings hurt far more than a slightly-off magnesium).
@@ -2095,6 +2166,25 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank 
           </div>
         );
       })()}
+
+      <div className="rb-h2"><Wrench size={16} color="var(--gold)" /> Equipment
+        <small style={{ cursor: "pointer", color: "var(--aqua)" }} onClick={() => setEquipOpen(true)}>{state.equipment && state.equipment.length ? "manage ›" : "add gear ›"}</small>
+      </div>
+      <div className="rb-card" style={{ padding: "12px 16px", marginBottom: 14, cursor: "pointer" }} onClick={() => setEquipOpen(true)}>
+        {(state.equipment || []).length === 0 ? (
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5 }}>
+            Log your lights, pumps, and filtration — DeepDive, ReefID, and fit checks factor your actual gear into their advice.
+          </div>
+        ) : (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {state.equipment.slice(0, 6).map((e) => (
+              <span key={e.id} className="rb-badge" style={{ fontSize: 11, background: "rgba(255,194,77,.1)", color: "var(--gold)", border: "1px solid rgba(255,194,77,.3)" }}>{e.name}</span>
+            ))}
+            {state.equipment.length > 6 && <span style={{ fontSize: 11.5, color: "var(--muted-2)", alignSelf: "center" }}>+{state.equipment.length - 6} more</span>}
+          </div>
+        )}
+      </div>
+      {equipOpen && <EquipmentSheet equipment={state.equipment || []} onClose={() => setEquipOpen(false)} onAdd={addEquipment} onDelete={deleteEquipment} />}
 
       <div className="rb-cols2">
         <div>
@@ -4806,10 +4896,13 @@ function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }
     try {
       if (!(await gateAI("deepdive"))) { setFitBusy(false); return; }
       const t = (tanks || []).find((x) => x.id === tankId);
-      const { data: stock } = await supabase.from("livestock").select("name, kind, status").eq("tank_id", tankId);
+      const [{ data: stock }, { data: equip }] = await Promise.all([
+        supabase.from("livestock").select("name, kind, status").eq("tank_id", tankId),
+        supabase.from("equipment").select("category, name, details").eq("tank_id", tankId),
+      ]);
       const alive = (stock || []).filter((s) => (s.status || "alive") === "alive").map((s) => `${s.name} (${s.kind})`).join(", ") || "nothing yet";
-      const SYS = "You are Tidepool Reef's stocking advisor. Answer in 2-3 honest sentences: will this species work in this tank? Consider adult size vs tank volume, temperament vs existing livestock, and bioload. If it's a bad fit, say so plainly and why.";
-      const q = `Species: ${pick.name} (${pick.sci}). Tank: "${t ? t.name : "tank"}", ${t ? t.volume : "?"} gallons. Current livestock: ${alive}.`;
+      const SYS = "You are Tidepool Reef's stocking advisor. Answer in 2-3 honest sentences: will this species work in this tank? Consider adult size vs tank volume, temperament vs existing livestock, bioload, and whether the tank's lighting and flow equipment suits this species. If it's a bad fit, say so plainly and why.";
+      const q = `Species: ${pick.name} (${pick.sci}). Tank: "${t ? t.name : "tank"}", ${t ? t.volume : "?"} gallons. Current livestock: ${alive}. Equipment: ${equipLine(equip)}.`;
       const reply = await askReefAI([{ role: "user", content: q }], SYS, "deepdive");
       setFit(reply || "Couldn't run the check just now.");
     } catch (e) { setFit("Couldn't run the check just now."); }
@@ -5076,7 +5169,7 @@ function TankLog({ state, addLogEntry, go }) {
       const events = state.log.filter((e) => e.date >= wk && e.type !== "AI Report").map((e) => `${e.type}: ${e.note}`).join(" | ") || "no journal entries";
       const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
       const SYS = `You are Tidepool Reef's weekly tank reporter. Today's date is ${today}; the report covers the past 7 days. Start with "Week of ${today}:" then a concise 3-5 sentence summary: parameter trends and stability, notable events, and one specific thing to watch or do next week. Plain sentences only — NO markdown, NO headings, NO asterisks. Honest, no fluff.`;
-      const q = `Tank "${state.tank ? state.tank.name : ""}" (${state.tank ? state.tank.volume : "?"}g). This week's test readings (oldest→newest): ${paramsTxt}. Journal events: ${events}.`;
+      const q = `Tank "${state.tank ? state.tank.name : ""}" (${state.tank ? state.tank.volume : "?"}g; equipment: ${equipLine(state.equipment)}). This week's test readings (oldest→newest): ${paramsTxt}. Journal events: ${events}.`;
       const reply = await askReefAI([{ role: "user", content: q }], SYS, "deepdive");
       if (reply) await addLogEntry("AI Report", stripMd(reply));   // optimistic — appears in the journal immediately
     } catch (e) { console.error("weekly report failed:", e); }
@@ -5130,7 +5223,7 @@ function FreeTasteBanner({ used, limit, unit, onUpgrade }) {
   );
 }
 
-function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) {
+function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock, equipment }) {
   const [addOpen, setAddOpen] = useState(false);
   const [added, setAdded] = useState("");
   const [img, setImg] = useState(null);     // {b64, media, url}
@@ -5168,7 +5261,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock }) 
     const stock = (livestock || []).filter((l) => (l.status || "alive") === "alive");
     const stockList = stock.length ? stock.map((l) => `${l.name}${l.type ? " (" + l.type + ")" : ""}`).join(", ") : "no livestock yet";
     return `Tank "${tank.name}": ${tank.model || "reef tank"}, ${tank.volume} gallons, running since ${tank.since || "recently"}. ` +
-      `Current parameters: ${params}. Current livestock: ${stockList}.`;
+      `Current parameters: ${params}. Current livestock: ${stockList}. Equipment: ${equipLine(equipment)}.`;
   };
 
   const onFile = (e) => {
@@ -5530,6 +5623,7 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
     `The user is currently asking about their tank "${t.name}" (${t.model}, ${t.volume} gallons, running since ${t.since}). ` +
     `Latest test results for ${t.name} — ${snapshot()} ` +
     `Livestock in ${t.name}: ${state.livestock.map((l) => l.name).join(", ") || "none logged"}. ` +
+    `Equipment on ${t.name}: ${equipLine(state.equipment)}. Factor lighting, flow, and filtration into advice when relevant. ` +
     "Answer questions about THIS tank using this context unless the user clearly asks about something else. " +
     "If the user attaches a photo, analyze what is actually visible in it (species, condition, symptoms, pests, equipment) and connect it to their tank context and question. " +
     "Give practical, friendly, specific guidance. Keep answers short. Focus on what's drifting and 2-3 concrete actions. Never recommend dangerous dosing.";
