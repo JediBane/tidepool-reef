@@ -648,9 +648,16 @@ function TermsGate({ uid, onAccepted }) {
   const [busy, setBusy] = useState(false);
   const accept = async () => {
     setBusy(true);
-    const { error } = await supabase.rpc("accept_terms", { v: TOS_VERSION });
+    // Primary: security-definer RPC. Fallback: direct own-row update. Surface the real error.
+    let err = null;
+    const r1 = await supabase.rpc("accept_terms", { v: TOS_VERSION });
+    if (r1.error) {
+      err = r1.error;
+      const r2 = await supabase.from("profiles").update({ tos_accepted_at: new Date().toISOString(), tos_version: TOS_VERSION }).eq("id", uid);
+      if (!r2.error) err = null;
+    }
     setBusy(false);
-    if (error) { alert("Couldn't record your acceptance — try again."); return; }
+    if (err) { alert(`Couldn't record your acceptance.\n\nError: ${err.message || JSON.stringify(err)}`); return; }
     onAccepted();
   };
   return (
