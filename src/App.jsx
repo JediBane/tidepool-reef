@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@supabase/supabase-js";
 import { REEFPEDIA, REEFPEDIA_CATS } from "./reefpedia.js";
+import { TERMS, PRIVACY, TOS_VERSION } from "./legal.js";
 import { ZOAS, ZOA_TIERS, ZOA_CARE, ZOA_TIPS } from "./zoas.js";
 import SPECIES_IMAGES from "./species-images.json";
 
@@ -606,6 +607,55 @@ const AI_GATE = { check: null, sync: null };   // main component installs the ch
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
 const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").replace(/\.0$/, "");
+function LegalSheet({ doc, onClose }) {
+  const sections = doc === "privacy" ? PRIVACY : TERMS;
+  return (
+    <div className="rb-overlay" onClick={onClose} style={{ zIndex: 320 }}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()} style={{ width: "min(640px,100%)" }}>
+        <div className="rb-sheet-h"><b>{sections[0][0]}</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        {sections.map(([h, body], i) => (
+          <div key={i} style={{ marginBottom: 14 }}>
+            {i > 0 && <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 4 }}>{h}</div>}
+            <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.65, whiteSpace: "pre-wrap" }}>{body}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* Blocks the app until the current Terms/Privacy version is accepted.
+   Covers existing users and version bumps; new signups also consent at the form. */
+function TermsGate({ uid, onAccepted }) {
+  const [viewing, setViewing] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const accept = async () => {
+    setBusy(true);
+    const { error } = await supabase.from("profiles").update({ tos_accepted_at: new Date().toISOString(), tos_version: TOS_VERSION }).eq("id", uid);
+    setBusy(false);
+    if (error) { alert("Couldn't record your acceptance — try again."); return; }
+    onAccepted();
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 310, background: "rgba(2,6,10,.9)", backdropFilter: "blur(8px)", display: "grid", placeItems: "center", padding: 18 }}>
+      <div className="rb-card" style={{ maxWidth: 460, width: "100%", padding: 24 }}>
+        <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20 }}>Quick legal bit 🪸</div>
+        <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6, marginTop: 10 }}>
+          To keep using Tidepool Reef, please review and accept our{" "}
+          <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setViewing("terms")}>Terms of Service</span> and{" "}
+          <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setViewing("privacy")}>Privacy Policy</span>.
+          The short version: your data is yours, we don't sell it, AI advice is informational (not professional advice), and marketplace deals are between reefers.
+        </div>
+        <button className="rb-btn" style={{ width: "100%", marginTop: 18, padding: 13 }} disabled={busy} onClick={accept}>
+          {busy ? "Saving…" : "I agree — let's reef"}
+        </button>
+        <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", marginTop: 10, cursor: "pointer" }} onClick={() => supabase.auth.signOut()}>Disagree & sign out</div>
+      </div>
+      {viewing && <LegalSheet doc={viewing} onClose={() => setViewing(null)} />}
+    </div>
+  );
+}
+
 const AI_GATE_STATE = { serverCounts: false, disabled: false };
 // Journal → DeepDive handoff: tap a DeepDive journal entry to reopen that conversation.
 const PENDING_AI_THREAD = { id: null };
@@ -763,6 +813,8 @@ function AuthScreen() {
   const [handle, setHandle] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const [agreed, setAgreed] = useState(false);
+  const [legalDoc, setLegalDoc] = useState(null);   // "terms" | "privacy"
   const authRef = useRef(null);
 
   const scrollToAuth = () => { if (authRef.current) authRef.current.scrollIntoView({ behavior: "smooth", block: "center" }); };
@@ -773,6 +825,7 @@ function AuthScreen() {
       if (mode === "signup") {
         const clean = handle.trim().replace(/[^a-zA-Z0-9_]/g, "");
         if (clean.length < 2) { setMsg("Pick a handle (letters, numbers, underscores)."); setBusy(false); return; }
+        if (!agreed) { setMsg("Please agree to the Terms of Service and Privacy Policy to create an account."); setBusy(false); return; }
         const redirectBase = (typeof window !== "undefined" && window.location && window.location.origin && !window.location.origin.includes("localhost"))
           ? window.location.origin
           : "https://reefpulse-app.netlify.app";
@@ -897,8 +950,21 @@ function AuthScreen() {
               <input className="rb-input" type="password" placeholder="••••••••" value={pw} onChange={(e) => setPw(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && email && pw && !busy) submit(); }} />
             </div>
+            {mode === "signup" && (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 9, marginBottom: 12, cursor: "pointer" }} onClick={() => setAgreed((a) => !a)}>
+                <div style={{ width: 19, height: 19, borderRadius: 6, flex: "none", marginTop: 1, display: "grid", placeItems: "center",
+                  border: agreed ? "1px solid var(--aqua)" : "1px solid var(--brd-2)", background: agreed ? "var(--aqua)" : "transparent" }}>
+                  {agreed && <Check size={13} color="#04111a" />}
+                </div>
+                <div style={{ fontSize: 12, color: "var(--muted)", lineHeight: 1.5 }}>
+                  I agree to the{" "}
+                  <span style={{ color: "var(--aqua)", fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); setLegalDoc("terms"); }}>Terms of Service</span>{" "}and{" "}
+                  <span style={{ color: "var(--aqua)", fontWeight: 600 }} onClick={(e) => { e.stopPropagation(); setLegalDoc("privacy"); }}>Privacy Policy</span>.
+                </div>
+              </div>
+            )}
             {msg && <div style={{ color: "var(--warn)", fontSize: 13, marginBottom: 10, lineHeight: 1.4 }}>{msg}</div>}
-            <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!email || !pw || busy} onClick={submit}>
+            <button className="rb-btn" style={{ width: "100%", padding: 14 }} disabled={!email || !pw || busy || (mode === "signup" && !agreed)} onClick={submit}>
               {busy ? "One sec…" : mode === "signup" ? "Create my free account" : "Sign in"}
             </button>
             {mode === "signup" && (
@@ -906,6 +972,7 @@ function AuthScreen() {
                 Already have an account? <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={() => setMode("signin")}>Sign in</span>
               </div>
             )}
+            {legalDoc && <LegalSheet doc={legalDoc} onClose={() => setLegalDoc(null)} />}
             {mode === "signin" && (
               <div style={{ textAlign: "center", fontSize: 12, color: "var(--muted)", marginTop: 12 }}>
                 <span style={{ color: "var(--aqua)", cursor: "pointer", fontWeight: 600 }} onClick={forgotPassword}>Forgot password?</span>
@@ -1326,6 +1393,10 @@ function TidepoolReef() {
   if (!state) {
     return (<div className="rb-root"><style>{STYLES}</style><div className="rb-shell"><div className="rb-empty" style={{ paddingTop: 120 }}>
       <Waves size={30} style={{ opacity: .6 }} /><div style={{ marginTop: 12 }}>Loading your reef…</div></div></div></div>);
+  }
+  // Terms gate: block until the current legal version is accepted (existing users + version bumps).
+  if (state.profile && state.profile.tos_version !== TOS_VERSION) {
+    return <TermsGate uid={state.uid} onAccepted={refresh} />;
   }
   if (!state.tanks.length) return <Onboarding profile={state.profile} onDone={refresh} />;
   // First-run nudge: right after creating their first tank, open the Log sheet so the
@@ -5786,6 +5857,7 @@ function Seller({ state, openSell, markSold, removeListing }) {
   );
 }
 function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTank }) {
+  const [legalDoc, setLegalDoc] = useState(null);
   const [tankSheet, setTankSheet] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const Toggle = ({ on, onChange }) => (
@@ -5864,7 +5936,12 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
           onClick={() => setDeleteOpen(true)}>Delete account</button>
       <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", marginTop: 16 }}>
         Tidepool Reef v{APP_VERSION}{APP_VERSION.startsWith("0.") ? " · pre-launch" : ""}
+        <span style={{ margin: "0 7px", opacity: .4 }}>·</span>
+        <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => setLegalDoc("terms")}>Terms</span>
+        <span style={{ margin: "0 7px", opacity: .4 }}>·</span>
+        <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => setLegalDoc("privacy")}>Privacy</span>
       </div>
+      {legalDoc && <LegalSheet doc={legalDoc} onClose={() => setLegalDoc(null)} />}
       </div>
 
       <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef</div>
