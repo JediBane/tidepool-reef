@@ -30,7 +30,9 @@ const STYLES = `
   --text:#e9f7fc;--muted:#84a8ba;--muted-2:#5b8194;
 }
 /* ── Themes ── */
+:root{--ovl:rgba(2,6,10,.82);--btn-ink:#04111a;}
 [data-theme="light"]{
+  --ovl:rgba(225,238,244,.88);
   --bg-0:#eef6f9;--bg-1:#f7fbfd;--bg-2:#ffffff;
   --glass:rgba(255,255,255,.72);--glass-2:rgba(240,248,251,.9);
   --brd:rgba(20,120,150,.18);--brd-2:rgba(20,120,150,.34);
@@ -204,7 +206,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   font-family:inherit;font-size:16px;padding:11px 13px;resize:none;outline:none;}
 .rb-input:focus{border-color:var(--brd-2);}
 .rb-btn{border:none;border-radius:12px;padding:11px 16px;font-family:'Hanken Grotesk';font-weight:700;font-size:14px;
-  background:linear-gradient(120deg,var(--aqua),var(--teal));color:var(--bg-0);cursor:pointer;display:inline-flex;
+  background:linear-gradient(120deg,var(--aqua),var(--teal));color:var(--btn-ink);cursor:pointer;display:inline-flex;
   align-items:center;gap:7px;justify-content:center;}
 .rb-btn:disabled{opacity:.5}
 .rb-btn.ghost{background:transparent;border:1px solid var(--brd-2);color:var(--text);}
@@ -224,7 +226,7 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   box-shadow:0 14px 34px -8px rgba(255,122,92,.6);}
 
 /* sheet */
-.rb-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:rgba(2,10,16,.7);backdrop-filter:blur(4px);
+.rb-overlay{position:fixed;top:0;left:0;right:0;bottom:0;z-index:60;background:var(--ovl);backdrop-filter:blur(4px);
   display:flex;align-items:flex-end;justify-content:center;animation:rbFade .2s both;overscroll-behavior:contain;}
 .rb-sheet{width:min(480px,100%);max-height:90vh;max-height:90dvh;overflow-y:auto;-webkit-overflow-scrolling:touch;background:linear-gradient(180deg,var(--bg-2),var(--bg-1));
   border:1px solid var(--brd);border-radius:26px 26px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));animation:rbSheet .3s cubic-bezier(.2,.8,.2,1) both;}
@@ -652,8 +654,8 @@ function TermsGate({ uid, onAccepted }) {
     onAccepted();
   };
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 310, background: "rgba(2,6,10,.9)", backdropFilter: "blur(8px)", display: "grid", placeItems: "center", padding: 18 }}>
-      <div className="rb-card" style={{ maxWidth: 460, width: "100%", padding: 24 }}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 310, background: "var(--ovl)", backdropFilter: "blur(8px)", display: "grid", placeItems: "center", padding: 18 }}>
+      <div className="rb-card" style={{ maxWidth: 460, width: "100%", padding: 24, background: "var(--bg-2)", border: "1px solid var(--brd-2)" }}>
         <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20 }}>Quick legal bit 🪸</div>
         <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.6, marginTop: 10 }}>
           To keep using Tidepool Reef, please review and accept our{" "}
@@ -1760,7 +1762,7 @@ function TidepoolReef() {
       <UpgradeSheet open={upgradeOpen} onClose={() => setUpgradeOpen(false)} profile={state ? state.profile : {}} />
 
       {justUpgraded && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,6,10,.8)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 20 }}
+        <div style={{ position: "fixed", inset: 0, zIndex: 340, background: "var(--ovl)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 20 }}
           onClick={() => setJustUpgraded(false)}>
           <div className="rb-card" style={{ maxWidth: 380, width: "100%", padding: 26, textAlign: "center", border: "1px solid rgba(46,230,200,.4)" }} onClick={(e) => e.stopPropagation()}>
             <div style={{ fontSize: 46 }}>🎉</div>
@@ -2156,7 +2158,7 @@ function UpgradeSheet({ open, onClose, profile }) {
     </div>
   );
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(2,6,10,.78)", backdropFilter: "blur(6px)",
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--ovl)", backdropFilter: "blur(6px)",
       display: "grid", placeItems: "center", padding: 18 }} onClick={onClose}>
       <div className="rb-card" style={{ maxWidth: 420, width: "100%", padding: 22, border: "1px solid rgba(176,108,255,.4)" }}
         onClick={(e) => e.stopPropagation()}>
@@ -2319,7 +2321,7 @@ function AdminUsers({ state }) {
 
       {/* customer detail — portal so it can't be trapped by animated ancestors */}
       {sel && createPortal(
-        <div style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(2,6,10,.78)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 16 }} onClick={() => setSel(null)}>
+        <div style={{ position: "fixed", inset: 0, zIndex: 320, background: "var(--ovl)", backdropFilter: "blur(6px)", display: "grid", placeItems: "center", padding: 16 }} onClick={() => setSel(null)}>
           <div className="rb-card" style={{ maxWidth: 520, width: "100%", maxHeight: "86vh", overflowY: "auto", padding: 20 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div>
