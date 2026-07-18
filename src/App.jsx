@@ -605,6 +605,7 @@ const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
 const AI_GATE = { check: null, sync: null };   // main component installs the checker + counter sync
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
+const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").replace(/\.0$/, "");
 const AI_GATE_STATE = { serverCounts: false, disabled: false };
 // Journal → DeepDive handoff: tap a DeepDive journal entry to reopen that conversation.
 const PENDING_AI_THREAD = { id: null };
@@ -828,7 +829,7 @@ function AuthScreen() {
             <button className="rb-btn" style={{ width: "100%", maxWidth: 300, margin: "22px auto 0", padding: 15, fontSize: 15 }} onClick={scrollToAuth}>
               <Sparkles size={17} /> Create your free account
             </button>
-            <div style={{ fontSize: 12.5, color: "var(--muted-2)", marginTop: 10 }}>Free to start · No credit card</div>
+            <div style={{ fontSize: 12.5, color: "var(--muted-2)", marginTop: 10 }}>Free to start · No credit card · v{APP_VERSION}</div>
           </div>
 
           {/* FEATURE SHOWCASE */}
@@ -2347,6 +2348,9 @@ function AdminOverview() {
       {chart("readings", "var(--teal)", "Parameter readings logged")}
       {chart("posts", "var(--violet)", "Community posts")}
       {chart("aithreads", "#8f5cd6", "AI conversations started")}
+      <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", margin: "16px 0 4px" }}>
+        Build v{APP_VERSION} · {APP_VERSION.startsWith("0.") ? "pre-launch — 1.0 ships at public launch" : "production"}
+      </div>
     </div>
   );
 }
@@ -5858,6 +5862,9 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
         </div>
         <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 12, background: "rgba(255,93,114,.15)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.4)" }}
           onClick={() => setDeleteOpen(true)}>Delete account</button>
+      <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", marginTop: 16 }}>
+        Tidepool Reef v{APP_VERSION}{APP_VERSION.startsWith("0.") ? " · pre-launch" : ""}
+      </div>
       </div>
 
       <div style={{ textAlign: "center", color: "var(--muted-2)", fontSize: 12, marginTop: 18 }}>Tidepool Reef</div>
