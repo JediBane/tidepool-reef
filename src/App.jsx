@@ -29,6 +29,20 @@ const STYLES = `
   --good:#3ce0a3;--warn:#ffc24d;--bad:#ff5d72;
   --text:#e9f7fc;--muted:#84a8ba;--muted-2:#5b8194;
 }
+/* ── Themes ── */
+[data-theme="light"]{
+  --bg-0:#eef6f9;--bg-1:#f7fbfd;--bg-2:#ffffff;
+  --glass:rgba(255,255,255,.72);--glass-2:rgba(240,248,251,.9);
+  --brd:rgba(20,120,150,.18);--brd-2:rgba(20,120,150,.34);
+  --aqua:#0e93b5;--aqua-d:#0b7691;--teal:#0fa88e;--coral:#e85c3f;--violet:#8a4fd6;--gold:#c98f1b;
+  --good:#159f6e;--warn:#c98f1b;--bad:#d94459;
+  --text:#12303c;--muted:#4a6b7a;--muted-2:#7592a0;
+}
+[data-theme="black"]{
+  --bg-0:#000000;--bg-1:#050505;--bg-2:#101418;
+  --glass:rgba(16,22,26,.6);--glass-2:rgba(10,14,17,.85);
+}
+
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
 #root{height:100%;}
@@ -606,6 +620,7 @@ const FREE_DEEPDIVE = 5;    // lifetime free DeepDive/AI messages
 const AI_GATE = { check: null, sync: null };   // main component installs the checker + counter sync
 // Once we learn the server-side gate is active (env key set, it counts), the client stops
 // incrementing to avoid double-counting. Until then, the client counts (works before the key is set).
+try { document.documentElement.dataset.theme = localStorage.getItem("tr:theme") || "actinic"; } catch (e) {}
 const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").replace(/\.0$/, "");
 function LegalSheet({ doc, onClose }) {
   const sections = doc === "privacy" ? PRIVACY : TERMS;
@@ -5858,6 +5873,13 @@ function Seller({ state, openSell, markSold, removeListing }) {
 }
 function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTank }) {
   const [legalDoc, setLegalDoc] = useState(null);
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem("tr:theme") || "actinic"; } catch (e) { return "actinic"; } });
+  const applyTheme = (t) => {
+    setTheme(t);
+    try { localStorage.setItem("tr:theme", t); } catch (e) {}
+    document.documentElement.dataset.theme = t;
+  };
+  const THEMES = [["actinic", "Actinic", "Deep reef blues (default)"], ["light", "Daylight", "Bright & clean"], ["black", "Moonlight", "True black — great on OLED"]];
   const [tankSheet, setTankSheet] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const Toggle = ({ on, onChange }) => (
@@ -5920,7 +5942,18 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
 
       <div className="rb-h2"><Settings size={16} color="var(--muted)" /> App</div>
       <div className="rb-card">
-        {[["Units", "Imperial (°F, gal)"], ["Theme", "Actinic (dark)"], ["Signed in as", "@" + state.profile.handle]].map(([k, v], i) => (
+        <div className="rb-li" style={{ display: "block" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>Theme</span>
+          </div>
+          <div className="rb-tabs" style={{ margin: "10px 0 2px", flexWrap: "wrap" }}>
+            {THEMES.map(([k, label, hint]) => (
+              <div key={k} className={"rb-chip" + (theme === k ? " on" : "")} title={hint} onClick={() => applyTheme(k)}>{label}</div>
+            ))}
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--muted-2)", marginTop: 6 }}>{(THEMES.find(([k]) => k === theme) || [])[2]}</div>
+        </div>
+        {[["Units", "Imperial (°F, gal)"], ["Signed in as", "@" + state.profile.handle]].map(([k, v], i) => (
           <div key={i} className="rb-li"><div className="nm">{k}</div><div style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>{v}</div></div>
         ))}
       </div>
