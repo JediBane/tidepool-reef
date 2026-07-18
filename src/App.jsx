@@ -1811,7 +1811,7 @@ function TidepoolReef() {
       )}
       {sheet === "libDetail" && libItem && (
         <LibDetail item={libItem} uid={state.uid} count={state.speciesCounts[libItem.id] || 0}
-          onAddToTank={setAddItem}
+          onAddToTank={(it) => { setSheet(null); setAddItem(it); }}
           onClose={() => setSheet(null)}
           onOpenTank={(tid) => { setPublicTank(tid); setSheet("publicTank"); }}
           onMessage={(who) => { setMsgTo({ ...who, species: libItem }); setSheet("message"); }} />
