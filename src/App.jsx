@@ -2907,29 +2907,86 @@ function AdminPhotos() {
 
 /* ---------------- Achievements ---------------- */
 const ACHIEVEMENTS = [
-  { id: "first_tank",   icon: "🪣", name: "Wet Hands",        desc: "Set up your first tank",                tier: "bronze", check: (s) => s.tanks.length >= 1 },
-  { id: "multi_tank",   icon: "🏠", name: "Fish Room",         desc: "Run 3 or more tanks at once",           tier: "gold",   check: (s) => s.tanks.length >= 3 },
-  { id: "first_log",    icon: "🧪", name: "Testing Testing",   desc: "Log your first parameter reading",      tier: "bronze", check: (s) => s.history.length >= 1 },
-  { id: "log_50",       icon: "📈", name: "Data Diver",        desc: "Log 50 parameter readings",             tier: "silver", check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 50 },
-  { id: "log_100",      icon: "🔬", name: "Reef Scientist",    desc: "Log 100 parameter readings",            tier: "gold",   check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 100 },
-  { id: "stocked_10",   icon: "🐠", name: "Getting Crowded",   desc: "Add 10 livestock to your tanks",        tier: "bronze", check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 10 },
-  { id: "stocked_25",   icon: "🌊", name: "Living Reef",       desc: "Keep 25 livestock across your tanks",   tier: "silver", check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 25 },
-  { id: "coral_keeper", icon: "🪸", name: "Coral Gardener",    desc: "Keep 15 corals",                        tier: "silver", check: (s, d) => d.corals >= 15 },
-  { id: "first_post",   icon: "💬", name: "Say Hi",            desc: "Make your first community post",        tier: "bronze", check: (s, d) => d.myPosts >= 1 },
-  { id: "poster_10",    icon: "📣", name: "Reef Voice",        desc: "Make 10 community posts",               tier: "silver", check: (s, d) => d.myPosts >= 10 },
-  { id: "pearls_500",   icon: "🦪", name: "Pearl Collector",   desc: "Earn 500 Pearls",                       tier: "silver", check: (s) => (s.pearls || 0) >= 500 },
-  { id: "pearls_1000",  icon: "👑", name: "Pearl Hoarder",     desc: "Earn 1,000 Pearls",                     tier: "gold",   check: (s) => (s.pearls || 0) >= 1000 },
-  { id: "shared",       icon: "🔗", name: "Open Book",         desc: "Share a tank's parameters publicly",    tier: "bronze", check: (s) => s.tanks.some((t) => t.shareParams) },
-  { id: "reefpedia_20", icon: "📖", name: "Librarian",         desc: "Link 20 livestock to Reefpedia",        tier: "silver", check: (s) => (s.totals ? s.totals.linked : s.livestock.filter((l) => l.species_id).length) >= 20 },
-  { id: "veteran",      icon: "🎖️", name: "Founding Reefer",   desc: "One of the first on Tidepool Reef",     tier: "gold",   check: () => true },
+  { id: "first_tank",   icon: "🪣", name: "Wet Hands",        tier: "bronze", desc: "Set up your first tank",
+    why: "Your reef's story starts here — everything in the app builds on a tank.",
+    check: (s) => s.tanks.length >= 1, prog: (s) => [Math.min(s.tanks.length, 1), 1] },
+  { id: "multi_tank",   icon: "🏠", name: "Fish Room",        tier: "gold",   desc: "Run 3 or more tanks at once",
+    why: "Certified multi-tank syndrome. There is no cure, only more tanks.",
+    check: (s) => s.tanks.length >= 3, prog: (s) => [s.tanks.length, 3] },
+  { id: "first_log",    icon: "🧪", name: "Testing Testing",  tier: "bronze", desc: "Log your first parameter reading",
+    why: "You can't fix what you don't measure — testing is the core habit of a healthy reef.",
+    check: (s) => s.history.length >= 1, prog: (s) => [Math.min(s.history.length, 1), 1] },
+  { id: "log_50",       icon: "📈", name: "Data Diver",       tier: "silver", desc: "Log 50 parameter readings",
+    why: "With this much data, trends emerge — drift alerts and AI advice get sharper.",
+    check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 50, prog: (s) => [(s.totals ? s.totals.readings : s.history.length), 50] },
+  { id: "log_100",      icon: "🔬", name: "Reef Scientist",   tier: "gold",   desc: "Log 100 parameter readings",
+    why: "Your tank has a real dataset now. Publish when ready.",
+    check: (s) => (s.totals ? s.totals.readings : s.history.length) >= 100, prog: (s) => [(s.totals ? s.totals.readings : s.history.length), 100] },
+  { id: "stocked_10",   icon: "🐠", name: "Getting Crowded",  tier: "bronze", desc: "Add 10 livestock to your tanks",
+    why: "A reef is its inhabitants — logging them unlocks care advice, spend tracking, and anniversaries.",
+    check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 10, prog: (s) => [(s.totals ? s.totals.livestock : s.livestock.length), 10] },
+  { id: "stocked_25",   icon: "🌊", name: "Living Reef",      tier: "silver", desc: "Keep 25 livestock across your tanks",
+    why: "A thriving ecosystem under your care.",
+    check: (s) => (s.totals ? s.totals.livestock : s.livestock.length) >= 25, prog: (s) => [(s.totals ? s.totals.livestock : s.livestock.length), 25] },
+  { id: "coral_keeper", icon: "🪸", name: "Coral Gardener",   tier: "silver", desc: "Keep 15 corals",
+    why: "Fish visit; coral is the garden you grow.",
+    check: (s, d) => d.corals >= 15, prog: (s, d) => [d.corals, 15] },
+  { id: "first_post",   icon: "💬", name: "Say Hi",           tier: "bronze", desc: "Make your first community post",
+    why: "The community only works because reefers show their work. Welcome in.",
+    check: (s, d) => d.myPosts >= 1, prog: (s, d) => [Math.min(d.myPosts, 1), 1] },
+  { id: "poster_10",    icon: "📣", name: "Reef Voice",       tier: "silver", desc: "Make 10 community posts",
+    why: "You're part of the reason the feed is worth scrolling.",
+    check: (s, d) => d.myPosts >= 10, prog: (s, d) => [d.myPosts, 10] },
+  { id: "pearls_500",   icon: "🦪", name: "Pearl Collector",  tier: "silver", desc: "Earn 500 Pearls",
+    why: "Pearls come from participating — posting, helping, contributing.",
+    check: (s) => (s.pearls || 0) >= 500, prog: (s) => [s.pearls || 0, 500] },
+  { id: "pearls_1000",  icon: "👑", name: "Pearl Hoarder",    tier: "gold",   desc: "Earn 1,000 Pearls",
+    why: "Reef royalty. The dragon of the tidepool, sleeping on its hoard.",
+    check: (s) => (s.pearls || 0) >= 1000, prog: (s) => [s.pearls || 0, 1000] },
+  { id: "shared",       icon: "🔗", name: "Open Book",        tier: "bronze", desc: "Share a tank's parameters publicly",
+    why: "Transparent numbers help every reefer calibrate their own.",
+    check: (s) => s.tanks.some((t) => t.shareParams), prog: null },
+  { id: "reefpedia_20", icon: "📖", name: "Librarian",        tier: "silver", desc: "Link 20 livestock to Reefpedia species",
+    why: "Species links power keeper counts, wishlists, and smarter AI answers.",
+    check: (s) => (s.totals ? s.totals.linked : s.livestock.filter((l) => l.species_id).length) >= 20, prog: (s) => [(s.totals ? s.totals.linked : s.livestock.filter((l) => l.species_id).length), 20] },
+  { id: "veteran",      icon: "🎖️", name: "Founding Reefer",  tier: "gold",   desc: "One of the first on Tidepool Reef",
+    why: "You were here before it was cool. Wear it forever.",
+    check: () => true, prog: null },
+  /* ── The feature-driving ten ── */
+  { id: "first_dive",   icon: "🤖", name: "First Dive",       tier: "bronze", desc: "Start your first DeepDive conversation",
+    why: "DeepDive knows your tank, livestock, and gear — ask it something real.",
+    check: (s, d, x) => (x.threads || 0) >= 1, prog: (s, d, x) => [Math.min(x.threads || 0, 1), 1] },
+  { id: "reef_brain",   icon: "🧠", name: "Reef Brain",       tier: "silver", desc: "Have 10 DeepDive conversations",
+    why: "Ten consults deep — your journal doubles as a case history.",
+    check: (s, d, x) => (x.threads || 0) >= 10, prog: (s, d, x) => [x.threads || 0, 10] },
+  { id: "gearhead",     icon: "🔧", name: "Gearhead",         tier: "bronze", desc: "Log 3 pieces of equipment",
+    why: "The AI factors your actual lights, flow, and filtration into every answer.",
+    check: (s, d, x) => (x.equipment || 0) >= 3, prog: (s, d, x) => [x.equipment || 0, 3] },
+  { id: "diary_25",     icon: "📓", name: "Dear Diary",       tier: "silver", desc: "Write 25 journal entries",
+    why: "The tank's story, written down — look back on what worked.",
+    check: (s, d, x) => (x.journal || 0) >= 25, prog: (s, d, x) => [x.journal || 0, 25] },
+  { id: "shutterbug",   icon: "📷", name: "Shutterbug",       tier: "silver", desc: "Get a photo approved into Reefpedia",
+    why: "Every library photo is a real tank shot from a real reefer — including yours now.",
+    check: (s, d, x) => (x.contribs || 0) >= 1, prog: (s, d, x) => [Math.min(x.contribs || 0, 1), 1] },
+  { id: "window_shopper", icon: "❤️", name: "Window Shopper", tier: "bronze", desc: "Wishlist 5 species",
+    why: "Plan the reef you want — and get matched when one's for sale nearby.",
+    check: (s, d, x) => (x.wishes || 0) >= 5, prog: (s, d, x) => [x.wishes || 0, 5] },
+  { id: "frag_dealer",  icon: "🏪", name: "Frag Dealer",      tier: "silver", desc: "Post a marketplace listing",
+    why: "Trade the growth — frags fund the addiction.",
+    check: (s, d, x) => (x.listings || 0) >= 1, prog: (s, d, x) => [Math.min(x.listings || 0, 1), 1] },
+  { id: "gatherer",     icon: "🎪", name: "Reef Gatherer",    tier: "gold",   desc: "Host a community event",
+    why: "Frag swaps and meetups are how local reef scenes get built. You built one.",
+    check: (s, d, x) => (x.hosted || 0) >= 1, prog: (s, d, x) => [Math.min(x.hosted || 0, 1), 1] },
+  { id: "show_up",      icon: "🤝", name: "Show Up",          tier: "bronze", desc: "RSVP to a community event",
+    why: "The hobby is better in person. Bring a frag.",
+    check: (s, d, x) => (x.rsvps || 0) >= 1, prog: (s, d, x) => [Math.min(x.rsvps || 0, 1), 1] },
+  { id: "one_year",     icon: "🎂", name: "One Year Club",    tier: "gold",   desc: "Keep a specimen for 365+ days",
+    why: "Longevity is the hobby's real trophy — anyone can buy a coral; keeping it is the craft.",
+    check: (s, d, x) => (x.oneYear || 0) >= 1, prog: null },
 ];
-const TIER_STYLE = {
-  bronze: { c: "#cd8b5f", bg: "rgba(205,139,95,.14)", bd: "rgba(205,139,95,.5)" },
-  silver: { c: "#c8d0d8", bg: "rgba(200,208,216,.14)", bd: "rgba(200,208,216,.5)" },
-  gold:   { c: "#ffd470", bg: "rgba(255,194,77,.16)", bd: "rgba(255,194,77,.55)" },
-};
-function computeAchievements(state, derived) {
-  return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived) }));
+function computeAchievements(state, derived, extra) {
+  const x = extra || {};
+  return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived, x), progress: a.prog ? a.prog(state, derived, x) : null }));
 }
 
 function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateProfile }) {
@@ -2946,7 +3003,44 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateP
   };
   const [editOpen, setEditOpen] = useState(false);
   const derived = { corals, fish, myPosts: myPosts.length };
-  const achievements = computeAchievements(state, derived);
+  const [xt, setXt] = useState({});           // extra achievement counts
+  const [unlocked, setUnlocked] = useState(null);   // newly-claimed toast
+  const [achDetail, setAchDetail] = useState(null); // tapped achievement
+  useEffect(() => {
+    let alive = true;
+    const tankIds = state.tanks.map((t) => t.id);
+    const cnt = (q) => q.then(({ count }) => count || 0);
+    Promise.all([
+      cnt(supabase.from("ai_threads").select("id", { count: "exact", head: true }).eq("user_id", state.uid)),
+      tankIds.length ? cnt(supabase.from("equipment").select("id", { count: "exact", head: true }).in("tank_id", tankIds)) : 0,
+      tankIds.length ? cnt(supabase.from("tank_log").select("id", { count: "exact", head: true }).in("tank_id", tankIds)) : 0,
+      cnt(supabase.from("species_photo_contributions").select("id", { count: "exact", head: true }).eq("contributor_id", state.uid).eq("status", "approved")),
+      cnt(supabase.from("wishlist").select("id", { count: "exact", head: true }).eq("profile_id", state.uid)),
+      cnt(supabase.from("listings").select("id", { count: "exact", head: true }).eq("seller_id", state.uid)),
+      cnt(supabase.from("events").select("id", { count: "exact", head: true }).eq("host_id", state.uid)),
+      cnt(supabase.from("event_rsvps").select("event_id", { count: "exact", head: true }).eq("profile_id", state.uid)),
+      tankIds.length ? cnt(supabase.from("livestock").select("id", { count: "exact", head: true }).in("tank_id", tankIds).lte("acquired_at", new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10))) : 0,
+    ]).then(([threads, equipment, journal, contribs, wishes, listings, hosted, rsvps, oneYear]) => {
+      if (alive) setXt({ threads, equipment, journal, contribs, wishes, listings, hosted, rsvps, oneYear, loaded: true });
+    });
+    return () => { alive = false; };
+  }, [state.uid]);
+  const achievements = computeAchievements(state, derived, xt);
+  // Persist newly-earned achievements (server-validated, +25 Pearls each) and toast them.
+  useEffect(() => {
+    if (!xt.loaded) return;
+    const earnedIds = achievements.filter((a) => a.earned).map((a) => a.id);
+    const known = state.profile.badges || [];
+    const fresh = earnedIds.filter((id) => !known.includes(id));
+    if (!fresh.length) return;
+    supabase.rpc("claim_achievements", { ids: earnedIds }).then(({ data }) => {
+      if (data && data.length) {
+        const names = achievements.filter((a) => data.includes(a.id));
+        setUnlocked({ names, pearls: data.length * 25 });
+        setTimeout(() => setUnlocked(null), 6000);
+      }
+    });
+  }, [xt.loaded]);
   const earned = achievements.filter((a) => a.earned);
   const locked = achievements.filter((a) => !a.earned);
   const ordered = [...earned, ...locked];   // earned first
@@ -3010,8 +3104,8 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateP
         {ordered.map((a) => {
           const ts = TIER_STYLE[a.tier];
           return (
-            <div key={a.id} className="rb-card" title={a.name + " — " + a.desc}
-              style={{ padding: "12px 6px", textAlign: "center", opacity: a.earned ? 1 : 0.38,
+            <div key={a.id} className="rb-card" onClick={() => setAchDetail(a)}
+              style={{ padding: "12px 6px", textAlign: "center", cursor: "pointer", opacity: a.earned ? 1 : 0.38,
                 border: a.earned ? `1px solid ${ts.bd}` : "1px solid var(--brd)", filter: a.earned ? "none" : "grayscale(1)" }}>
               <div style={{ fontSize: 26, lineHeight: 1 }}>{a.icon}</div>
               <div style={{ fontWeight: 700, fontSize: 10.5, marginTop: 5, lineHeight: 1.2 }}>{a.name}</div>
@@ -3019,6 +3113,51 @@ function Profile({ state, fish, corals, issues, go, myPosts, switchTank, updateP
           );
         })}
       </div>
+
+      {/* Achievement detail */}
+      {achDetail && (() => {
+        const a = achDetail, ts = TIER_STYLE[a.tier];
+        const [cur, goal] = a.progress || [];
+        return (
+          <div className="rb-overlay" onClick={() => setAchDetail(null)}>
+            <div className="rb-sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420 }}>
+              <div className="rb-sheet-h"><b>Achievement</b><div className="rb-iconbtn" onClick={() => setAchDetail(null)}><X size={18} /></div></div>
+              <div style={{ textAlign: "center", padding: "6px 4px 4px" }}>
+                <div style={{ fontSize: 54, lineHeight: 1, filter: a.earned ? "none" : "grayscale(1)", opacity: a.earned ? 1 : .5 }}>{a.icon}</div>
+                <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 21, marginTop: 10 }}>{a.name}</div>
+                <div style={{ marginTop: 6 }}>
+                  <span className="rb-badge" style={{ background: ts.bg, color: ts.c, border: `1px solid ${ts.bd}`, fontSize: 11, textTransform: "capitalize" }}>{a.tier}</span>
+                  {a.earned && <span className="rb-badge" style={{ marginLeft: 6, background: "rgba(60,224,163,.14)", color: "var(--good)", border: "1px solid rgba(60,224,163,.4)", fontSize: 11 }}>✓ Earned</span>}
+                </div>
+                <div style={{ fontWeight: 700, fontSize: 14, marginTop: 14 }}>{a.desc}</div>
+                <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.6, marginTop: 8 }}>{a.why}</div>
+                {a.progress && !a.earned && (
+                  <div style={{ marginTop: 16 }}>
+                    <div style={{ height: 8, borderRadius: 6, background: "var(--brd)", overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${Math.min(100, Math.round((cur / goal) * 100))}%`, background: `linear-gradient(90deg, var(--aqua), var(--teal))` }} />
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 6 }}>{cur} / {goal}</div>
+                  </div>
+                )}
+                {!a.earned && !a.progress && <div style={{ fontSize: 12, color: "var(--muted-2)", marginTop: 14 }}>Not earned yet</div>}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Unlock toast */}
+      {unlocked && (
+        <div style={{ position: "fixed", left: "50%", bottom: "calc(88px + env(safe-area-inset-bottom, 0px))", transform: "translateX(-50%)",
+          zIndex: 300, background: "var(--bg-2)", border: "1px solid rgba(255,194,77,.55)", borderRadius: 14, padding: "12px 18px",
+          boxShadow: "0 10px 34px -8px rgba(0,0,0,.6)", maxWidth: "88%", textAlign: "center" }}>
+          <div style={{ fontWeight: 800, fontSize: 14 }}>🏆 Achievement{unlocked.names.length > 1 ? "s" : ""} unlocked!</div>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>
+            {unlocked.names.map((n) => n.icon + " " + n.name).join("  ·  ")}
+            <span style={{ color: "var(--gold)", fontWeight: 700 }}>  +{unlocked.pearls} Pearls</span>
+          </div>
+        </div>
+      )}
 
       {/* Activity */}
       {wishlist.length > 0 && (<>
