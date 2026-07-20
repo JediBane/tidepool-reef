@@ -2801,10 +2801,40 @@ function AdminAudit() {
   );
 }
 
+function AdminFeedback() {
+  const [rows, setRows] = useState(null);
+  const load = () => supabase.rpc("admin_list_feedback").then(({ data, error }) => { if (!error) setRows(data || []); });
+  useEffect(() => { load(); }, []);
+  const markSeen = async (id) => { await supabase.rpc("admin_feedback_seen", { fid: id }); load(); };
+  if (!rows) return <div className="rb-empty" style={{ padding: 36 }}>Loading feedback…</div>;
+  const catColor = { Bug: "var(--bad)", Idea: "var(--aqua)", "Love it": "var(--good)", Confusing: "var(--warn)", Other: "var(--muted)" };
+  return (
+    <div>
+      <div className="rb-h2" style={{ marginTop: 6 }}>🧪 Tester feedback <small>{rows.filter((r) => r.status === "new").length} new · {rows.length} total</small></div>
+      <div className="rb-card">
+        {rows.length === 0 && <div className="rb-empty" style={{ padding: 18 }}>No feedback yet — send the invites!</div>}
+        {rows.map((f) => (
+          <div key={f.id} className="rb-li" style={{ alignItems: "flex-start", opacity: f.status === "seen" ? .55 : 1 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">
+                <span style={{ color: catColor[f.category] || "var(--text)" }}>{f.category}</span>
+                <span style={{ color: "var(--muted)", fontWeight: 400, fontSize: 12 }}> · @{f.handle} · v{f.version || "?"} · {fmtDate(new Date(f.created).getTime())}</span>
+              </div>
+              <div className="sub" style={{ marginTop: 3, lineHeight: 1.5 }}>{f.message}</div>
+            </div>
+            {f.status === "new" && <span className="rb-chip" style={{ fontSize: 11, flex: "none" }} onClick={() => markSeen(f.id)}>✓ Seen</span>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminPanel({ state }) {
   const [tab, setTab] = useState("overview");
   const [photoQ, setPhotoQ] = useState(0);
   const [reportQ, setReportQ] = useState(0);
+  const [fbQ, setFbQ] = useState(0);
   useEffect(() => {
     let alive = true;
     supabase.from("species_photo_contributions").select("id", { count: "exact", head: true }).eq("status", "pending")
@@ -2812,13 +2842,16 @@ function AdminPanel({ state }) {
     supabase.rpc("admin_list_reports").then(({ data, error }) => {
       if (alive && !error) setReportQ((data || []).filter((r) => r.status === "open").length);
     });
+    supabase.rpc("admin_list_feedback").then(({ data, error }) => {
+      if (alive && !error) setFbQ((data || []).filter((f) => f.status === "new").length);
+    });
     return () => { alive = false; };
   }, [tab]);
   return (
     <div className="rb-fadein">
       <div className="rb-tabs" style={{ marginTop: 4, flexWrap: "wrap" }}>
-        {[["overview", "Overview"], ["reports", "Reports"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"], ["settings", "Settings"], ["audit", "Audit"]].map(([k, l]) => {
-          const badge = k === "photos" ? photoQ : k === "reports" ? reportQ : 0;
+        {[["overview", "Overview"], ["reports", "Reports"], ["feedback", "Feedback"], ["users", "Users"], ["content", "Content"], ["market", "Market"], ["photos", "Photos"], ["settings", "Settings"], ["audit", "Audit"]].map(([k, l]) => {
+          const badge = k === "photos" ? photoQ : k === "reports" ? reportQ : k === "feedback" ? fbQ : 0;
           return (
             <div key={k} className={"rb-chip" + (tab === k ? " on" : "")} onClick={() => setTab(k)} style={{ position: "relative" }}>
               {l}{badge > 0 && (
@@ -2834,6 +2867,7 @@ function AdminPanel({ state }) {
       {tab === "market" && <AdminMarket />}
       {tab === "photos" && <AdminPhotos />}
       {tab === "reports" && <AdminReports />}
+      {tab === "feedback" && <AdminFeedback />}
       {tab === "settings" && <AdminSettings />}
       {tab === "audit" && <AdminAudit />}
     </div>
@@ -5988,8 +6022,53 @@ function Seller({ state, openSell, markSold, removeListing }) {
     </div>
   );
 }
+function FeedbackSheet({ uid, onClose }) {
+  const [cat, setCat] = useState("Bug");
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const send = async () => {
+    if (!msg.trim() || busy) return;
+    setBusy(true);
+    const { error } = await supabase.from("feedback").insert({ profile_id: uid, category: cat, message: msg.trim(), app_version: APP_VERSION });
+    setBusy(false);
+    if (error) { alert("Couldn't send — try again."); return; }
+    setSent(true);
+  };
+  return (
+    <div className="rb-overlay" onClick={onClose}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()}>
+        <div className="rb-sheet-h"><b>Beta feedback 🧪</b><div className="rb-iconbtn" onClick={onClose}><X size={18} /></div></div>
+        {sent ? (
+          <div style={{ textAlign: "center", padding: "26px 10px" }}>
+            <div style={{ fontSize: 34 }}>🙏</div>
+            <div style={{ fontWeight: 700, marginTop: 8 }}>Got it — thank you!</div>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, lineHeight: 1.5 }}>Every note makes the app better for every reefer. Keep 'em coming.</div>
+            <button className="rb-btn" style={{ marginTop: 16, padding: "11px 26px" }} onClick={onClose}>Done</button>
+          </div>
+        ) : (<>
+          <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+            You're testing v{APP_VERSION} — anything you send goes straight to the builder. Bugs, ideas, things that confused you, things you loved. All of it helps.
+          </div>
+          <div className="rb-field"><label>What kind?</label>
+            <div className="rb-tabs" style={{ margin: 0, flexWrap: "wrap" }}>
+              {["Bug", "Idea", "Love it", "Confusing", "Other"].map((c) => <div key={c} className={"rb-chip" + (cat === c ? " on" : "")} onClick={() => setCat(c)}>{c}</div>)}
+            </div>
+          </div>
+          <div className="rb-field"><label>Tell me about it</label>
+            <textarea className="rb-input" rows={4} placeholder={cat === "Bug" ? "What happened, and what did you expect? Which screen?" : cat === "Idea" ? "What would make this app better for your reef?" : "Say anything…"} value={msg} onChange={(e) => setMsg(e.target.value)} /></div>
+          <button className="rb-btn" style={{ width: "100%", padding: 12 }} disabled={!msg.trim() || busy} onClick={send}>
+            <Send size={15} /> {busy ? "Sending…" : "Send feedback"}
+          </button>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTank }) {
   const [legalDoc, setLegalDoc] = useState(null);
+  const [fbOpen, setFbOpen] = useState(false);
   const [theme, setTheme] = useState(() => { try { return localStorage.getItem("tr:theme") || "actinic"; } catch (e) { return "actinic"; } });
   const applyTheme = (t) => {
     setTheme(t);
@@ -6074,6 +6153,15 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
           <div key={i} className="rb-li"><div className="nm">{k}</div><div style={{ marginLeft: "auto", color: "var(--muted)", fontSize: 13 }}>{v}</div></div>
         ))}
       </div>
+      <div className="rb-card" style={{ padding: "14px 16px", marginTop: 14, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", border: "1px solid rgba(176,108,255,.35)" }} onClick={() => setFbOpen(true)}>
+        <div style={{ fontSize: 22, flex: "none" }}>🧪</div>
+        <div style={{ flex: 1 }}>
+          <b style={{ fontSize: 14 }}>Beta feedback</b>
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>Found a bug? Have an idea? Two taps and it's on the builder's desk.</div>
+        </div>
+        <ChevronRight size={17} color="var(--muted)" />
+      </div>
+      {fbOpen && <FeedbackSheet uid={state.uid} onClose={() => setFbOpen(false)} />}
       <button className="rb-btn ghost" style={{ width: "100%", marginTop: 14, padding: 13 }} onClick={() => supabase.auth.signOut()}>Sign out</button>
 
       <div className="rb-h2" style={{ marginTop: 22 }}><Trash2 size={15} color="var(--bad)" /> Danger zone</div>
