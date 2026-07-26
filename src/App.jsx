@@ -710,17 +710,56 @@ async function gateAI(kind) {
   return true;
 }
 
-/* Read + downscale a photo to ≤1600px JPEG (fits function payload; plenty for vision). */
-function readReefPhoto(f, cb) {
+/* ── Reef light correction ────────────────────────────────────────────────
+   Reef tanks run heavy actinic blue, so photos come out cyan/purple and the
+   real coral colour is invisible — to people AND to the vision model. Reefers
+   solve this with a physical orange lens filter; this is the software version.
+   Gray-world white balance: scale each channel so the frame's average goes
+   neutral, clamped so a nearly-red-free photo doesn't explode into noise, and
+   blended by `strength` so the user can dial it. */
+function reefBalance(data, strength) {
+  const d = data.data;
+  let sr = 0, sg = 0, sb = 0, n = 0;
+  for (let i = 0; i < d.length; i += 32) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; n++; }   // sample every 8th px
+  const mr = Math.max(sr / n, 1), mg = Math.max(sg / n, 1), mb = Math.max(sb / n, 1);
+  const gray = (mr + mg + mb) / 3;
+  const cl = (v) => Math.max(0.45, Math.min(3.2, v));
+  const kr = 1 + (cl(gray / mr) - 1) * strength;
+  const kg = 1 + (cl(gray / mg) - 1) * strength;
+  const kb = 1 + (cl(gray / mb) - 1) * strength;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.min(255, d[i] * kr);
+    d[i + 1] = Math.min(255, d[i + 1] * kg);
+    d[i + 2] = Math.min(255, d[i + 2] * kb);
+  }
+  return { blueCast: Math.max(0, Math.min(1, (mb / mr - 1.25) / 1.75)) };   // 0 = neutral, 1 = deep actinic
+}
+
+/* Remembered filter strength (per device). */
+const REEF_FILTER = {
+  get() { try { const v = localStorage.getItem("tr:reeffilter"); return v == null ? 0.85 : Number(v); } catch (e) { return 0.85; } },
+  set(v) { try { localStorage.setItem("tr:reeffilter", String(v)); } catch (e) {} },
+};
+
+/* Read + downscale a photo to ≤1600px JPEG (fits function payload; plenty for vision).
+   `warm` (0–1) applies the reef light correction above; result reports blueCast. */
+function readReefPhoto(f, cb, warm) {
   const url = URL.createObjectURL(f);
   const im = new Image();
   im.onload = () => {
     const scale = Math.min(1, 1600 / Math.max(im.width, im.height));
     const cv = document.createElement("canvas");
     cv.width = Math.round(im.width * scale); cv.height = Math.round(im.height * scale);
-    cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
+    const ctx = cv.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(im, 0, 0, cv.width, cv.height);
+    let meta = { blueCast: 0 };
+    try {
+      const px = ctx.getImageData(0, 0, cv.width, cv.height);
+      meta = reefBalance(px, warm > 0 ? warm : 0);          // strength 0 = measure only
+      if (warm > 0) ctx.putImageData(px, 0, 0);
+    } catch (e) { /* tainted canvas or OOM — fall through with the raw frame */ }
     const dataUrl = cv.toDataURL("image/jpeg", 0.85);
-    cb({ b64: dataUrl.split(",")[1], media: "image/jpeg", url: dataUrl });
+    cb({ b64: dataUrl.split(",")[1], media: "image/jpeg", url: dataUrl, blueCast: meta.blueCast, warm: warm || 0 });
     URL.revokeObjectURL(url);
   };
   im.onerror = () => {
@@ -729,6 +768,74 @@ function readReefPhoto(f, cb) {
     reader.readAsDataURL(f);
   };
   im.src = url;
+}
+
+/* Turn a processed data-URL back into a File for the upload paths. */
+function dataUrlToFile(dataUrl, name) {
+  const bytes = Uint8Array.from(atob(dataUrl.split(",")[1]), (c) => c.charCodeAt(0));
+  return new File([bytes], name || `reef-${Date.now()}.jpg`, { type: "image/jpeg" });
+}
+
+/* Reef light filter — the software orange lens. Shown when a photo comes in
+   with a heavy actinic cast; hold the preview to compare against the original. */
+function ReefPhotoTuner({ file, onUse, onCancel }) {
+  const [strength, setStrength] = useState(REEF_FILTER.get());
+  const [orig, setOrig] = useState(null);
+  const [shot, setShot] = useState(null);
+  const [holding, setHolding] = useState(false);
+  useEffect(() => { readReefPhoto(file, setOrig, 0); }, [file]);
+  useEffect(() => {
+    const t = setTimeout(() => readReefPhoto(file, setShot, strength), 70);   // debounce slider
+    return () => clearTimeout(t);
+  }, [file, strength]);
+  const shown = holding || strength === 0 ? orig : shot;
+  const use = () => {
+    const p = strength === 0 ? orig : shot;
+    if (!p) return;
+    REEF_FILTER.set(strength);
+    onUse({ ...p, file: dataUrlToFile(p.url, file.name) });
+  };
+  return (
+    <div className="rb-overlay" onClick={onCancel} style={{ zIndex: 260 }}>
+      <div className="rb-sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <div className="rb-sheet-h"><b>Reef light filter</b><div className="rb-iconbtn" onClick={onCancel}><X size={18} /></div></div>
+        <div style={{ fontSize: 12.5, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+          Blue actinic light hides the real colours — from you and from Reef ID. This corrects the white balance, like an orange lens filter. <b style={{ color: "var(--text)" }}>Hold the photo</b> to see the original.
+        </div>
+        {shown ? (
+          <img src={shown.url} alt="preview" className="rb-preview" style={{ userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}
+            onPointerDown={() => setHolding(true)} onPointerUp={() => setHolding(false)}
+            onPointerLeave={() => setHolding(false)} onPointerCancel={() => setHolding(false)} />
+        ) : <div className="rb-empty" style={{ padding: 40 }}>Processing…</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+          <span style={{ fontSize: 11.5, color: "var(--muted-2)", flex: "none" }}>Off</span>
+          <input type="range" min="0" max="100" value={Math.round(strength * 100)}
+            onChange={(e) => setStrength(Number(e.target.value) / 100)}
+            style={{ flex: 1, accentColor: "var(--gold)" }} />
+          <span style={{ fontSize: 11.5, color: "var(--muted-2)", flex: "none", minWidth: 30, textAlign: "right" }}>{Math.round(strength * 100)}%</span>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          {[["Off", 0], ["Light", 0.5], ["Standard", 0.85], ["Max", 1]].map(([lbl, v]) => (
+            <div key={lbl} className={"rb-chip" + (Math.abs(strength - v) < 0.02 ? " on" : "")} style={{ fontSize: 11.5 }} onClick={() => setStrength(v)}>{lbl}</div>
+          ))}
+        </div>
+        <button className="rb-btn" style={{ width: "100%", padding: 13, marginTop: 14 }} disabled={!shown} onClick={use}>
+          <Check size={15} /> Use this photo
+        </button>
+        <div style={{ fontSize: 11, color: "var(--muted-2)", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+          Works best with some white light in the tank — under pure blue there's little red left to recover.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Measure the actinic cast first: heavy blue → offer the filter, otherwise pass straight through. */
+function reefPick(file, setTune, done) {
+  readReefPhoto(file, (p) => {
+    if ((p.blueCast || 0) > 0.18 && REEF_FILTER.get() > 0) setTune({ file, done });
+    else done({ ...p, file });
+  }, 0);
 }
 
 /* Upload a downscaled photo to Supabase Storage, return its public URL. */
@@ -3280,6 +3387,7 @@ function HostEventSheet({ uid, onClose, onCreated }) {
 }
 
 function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following, toggleFollow }) {
+  const [tune, setTune] = useState(null);
   const [events, setEvents] = useState([]);
   const [hostOpen, setHostOpen] = useState(false);
   const loadEvents = () => fetchEvents().then(setEvents);
@@ -3329,7 +3437,8 @@ function Feed({ allPosts, liked, toggleLike, addPost, addComment, uid, following
               </div>
             ))}
             <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) { const u = URL.createObjectURL(f); setPhoto({ url: u, file: f }); } e.target.value = ""; }} />
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, (p) => setPhoto({ url: p.url, file: p.file })); e.target.value = ""; }} />
+            {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
             <div className="rb-chip" style={{ fontSize: 12, cursor: "pointer" }} onClick={() => photoRef.current && photoRef.current.click()}>
               <Camera size={13} /> Photo
             </div>
@@ -4141,6 +4250,7 @@ function PhotoCredit({ item }) {
 }
 
 function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTank }) {
+  const [tune, setTune] = useState(null);
   const [keepers, setKeepers] = useState(null);
   const [communityPhotos, setCommunityPhotos] = useState([]);
   const [wish, setWish] = useState(false);
@@ -4246,7 +4356,8 @@ function LibDetail({ item, onClose, uid, count, onOpenTank, onMessage, onAddToTa
             )}
             {/* Contribute — the legitimate, owned-by-consent way the library grows */}
             <input ref={contribRef} type="file" accept="image/*" style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) contributePhoto(f); e.target.value = ""; }} />
+              onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, (p) => contributePhoto(p.file)); e.target.value = ""; }} />
+            {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
             {contribDone ? (
               <div style={{ fontSize: 12.5, color: "var(--good)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
                 <Check size={14} /> Submitted for review — thanks for helping build Reefpedia!
@@ -5044,6 +5155,7 @@ function Tracker({ state, latest, sel, setSel, addLivestock, endLivestock, hideL
 const fmtAcq = (d) => { try { return new Date(d + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); } catch (e) { return d; } };
 
 function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }) {
+  const [tune, setTune] = useState(null);
   const pf = prefill || {};
   const [kind, setKind] = useState(pf.kind || "Coral");
   const [name, setName] = useState(pf.name || "");
@@ -5150,7 +5262,8 @@ function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }
         {/* Photo */}
         <div className="rb-field"><label>Photo of your specimen</label>
           <input ref={photoRef} type="file" accept="image/*" style={{ display: "none" }}
-            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) setPhoto({ url: URL.createObjectURL(f), file: f }); e.target.value = ""; }} />
+            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, (p) => setPhoto({ url: p.url, file: p.file })); e.target.value = ""; }} />
+            {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
           {photo ? (
             <div style={{ position: "relative", width: "fit-content" }}>
               <img src={photo.url} alt="" style={{ maxHeight: 130, borderRadius: 12 }} />
@@ -5185,6 +5298,7 @@ function AddLivestockSheet({ uid, onClose, onAdd, prefill, tanks, activeTankId }
 }
 
 function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
+  const [tune, setTune] = useState(null);
   const [endMode, setEndMode] = useState(false);
   const [reason, setReason] = useState("died");
   const [endReason, setEndReason] = useState("");
@@ -5271,7 +5385,8 @@ function LivestockDetailSheet({ item, uid, profile, onClose, onEnd }) {
           {isActive && !String(item.id).startsWith("tmp") && (
             <>
               <input ref={progRef} type="file" accept="image/*" style={{ display: "none" }}
-                onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) addProgressPhoto(f); e.target.value = ""; }} />
+                onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, (p) => addProgressPhoto(p.file)); e.target.value = ""; }} />
+            {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
               <div className="rb-chip" style={{ borderStyle: "dashed", color: "var(--aqua)", borderColor: "var(--brd-2)", opacity: progBusy ? .6 : 1 }}
                 onClick={() => !progBusy && progRef.current && progRef.current.click()}>
                 <Camera size={13} style={{ verticalAlign: -2, marginRight: 5 }} />{progBusy ? "Uploading…" : "Add progress photo"}
@@ -5439,9 +5554,11 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock, eq
       `Current parameters: ${params}. Current livestock: ${stockList}. Equipment: ${equipLine(equipment)}.`;
   };
 
+  const [tune, setTune] = useState(null);
+  const acceptPhoto = (photo) => { setImg(photo); setResult(""); setCard(null); setAdded(""); setAddOpen(false); setFollowMsgs([]); setTune(null); };
   const onFile = (e) => {
     const f = e.target.files && e.target.files[0]; if (!f) return;
-    readReefPhoto(f, (photo) => { setImg(photo); setResult(""); setCard(null); setAdded(""); setAddOpen(false); setFollowMsgs([]); });
+    reefPick(f, setTune, acceptPhoto);
   };
 
   const identify = async () => {
@@ -5515,8 +5632,12 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock, eq
           Point your camera at any coral, fish, or invert. Reef ID names the species, rates its care difficulty, and gives you quick care tips — then adds it to your tank in a tap.
         </div>
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onFile} />
+        {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
         {img
-          ? <img className="rb-preview" src={img.url} alt="to identify" />
+          ? <><img className="rb-preview" src={img.url} alt="to identify" />
+              <div className="rb-chip" style={{ fontSize: 11.5, marginTop: 8 }} onClick={() => setTune({ file: dataUrlToFile(img.url, "reef.jpg"), done: acceptPhoto })}>
+                ☀️ Reef light filter{img.warm > 0 ? ` · ${Math.round(img.warm * 100)}%` : ""}
+              </div></>
           : <div className="rb-drop" onClick={() => fileRef.current && fileRef.current.click()}>
               <Camera size={30} style={{ opacity: .8 }} /><div style={{ marginTop: 10, fontWeight: 600 }}>Tap to take or upload a photo</div>
             </div>}
@@ -5710,6 +5831,7 @@ function ReefID({ profile, onUpgrade, tanks, addTo, tank, history, livestock, eq
 
 /* ---------------- DeepDive AI ---------------- */
 function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
+  const [tune, setTune] = useState(null);
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -5940,7 +6062,8 @@ function DeepDive({ state, latest, issues, switchTank, onUpgrade, uid }) {
       )}
       <div className="rb-ai-row">
         <input ref={fileRef} type="file" accept="image/*" style={{ display: "none" }}
-          onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) readReefPhoto(f, setPhoto); e.target.value = ""; }} />
+          onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, setPhoto); e.target.value = ""; }} />
+            {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
         <button className="rb-btn ghost" style={{ flex: "none", padding: "0 13px" }} disabled={busy}
           onClick={() => fileRef.current && fileRef.current.click()} title="Attach a photo">
           <Camera size={17} color={photo ? "var(--aqua)" : "currentColor"} />
