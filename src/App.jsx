@@ -3091,6 +3091,11 @@ const ACHIEVEMENTS = [
     why: "Longevity is the hobby's real trophy — anyone can buy a coral; keeping it is the craft.",
     check: (s, d, x) => (x.oneYear || 0) >= 1, prog: null },
 ];
+const TIER_STYLE = {
+  bronze: { c: "#cd8b5f", bg: "rgba(205,139,95,.14)", bd: "rgba(205,139,95,.5)" },
+  silver: { c: "#c8d0d8", bg: "rgba(200,208,216,.14)", bd: "rgba(200,208,216,.5)" },
+  gold:   { c: "#ffd470", bg: "rgba(255,194,77,.16)", bd: "rgba(255,194,77,.55)" },
+};
 function computeAchievements(state, derived, extra) {
   const x = extra || {};
   return ACHIEVEMENTS.map((a) => ({ ...a, earned: !!a.check(state, derived, x), progress: a.prog ? a.prog(state, derived, x) : null }));
