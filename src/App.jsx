@@ -5085,12 +5085,21 @@ function Tracker({ state, latest, sel, setSel, addLivestock, endLivestock, hideL
       {latest && (<div className="rb-cols2">
       <div className="rb-grid">
         {PARAMS.map((pp) => {
-          const st = statusOf(pp, latest[pp.key]);
+          // Not every test covers every parameter — fall back to the most recent
+          // reading we have so tiles are never blank, and mark it as carried over.
+          const fresh = latest[pp.key] != null && Number.isFinite(+latest[pp.key]);
+          const lv = fresh ? { v: +latest[pp.key], date: latest.date } : lastVal(state.history, pp.key);
+          const st = lv ? statusOf(pp, lv.v) : "none";
+          const carried = !!lv && !fresh;
           return (
             <div key={pp.key} className={"rb-card rb-pcard" + (sel === pp.key ? " sel" : "")} onClick={() => setSel(pp.key)}>
-              <div className="top"><span className="lbl">{pp.label}</span><span className={"rb-sdot " + sclass[st]} /></div>
-              <div className="val">{latest[pp.key]}<u>{pp.unit}</u></div>
-              <div className="rb-trend">target {pp.ideal[0]}–{pp.ideal[1]}</div>
+              <div className="top"><span className="lbl">{pp.label}</span>{lv && <span className={"rb-sdot " + sclass[st]} />}</div>
+              <div className="val" style={carried ? { opacity: .62 } : undefined}>
+                {lv ? lv.v : "—"}<u>{pp.unit}</u>
+              </div>
+              <div className="rb-trend" style={carried ? { color: "var(--muted-2)" } : undefined}>
+                {carried ? `from ${fmtDate(lv.date)}` : `target ${pp.ideal[0]}–${pp.ideal[1]}`}
+              </div>
             </div>
           );
         })}
