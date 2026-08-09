@@ -217,8 +217,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   padding:8px 8px calc(8px + env(safe-area-inset-bottom,0px));
   border-radius:0;background:var(--glass-2);border:none;border-top:1px solid var(--brd);
   backdrop-filter:blur(20px);box-shadow:0 -10px 40px -16px rgba(0,0,0,.9);}
-.rb-navi{flex:1;max-width:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
-  padding:9px 0;border-radius:14px;color:var(--muted-2);cursor:pointer;font-size:10.5px;font-weight:600;transition:.18s;}
+.rb-navi{flex:1;min-width:0;max-width:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  padding:9px 2px;border-radius:14px;color:var(--muted-2);cursor:pointer;font-size:10.5px;font-weight:600;transition:.18s;}
+.rb-navi span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;letter-spacing:-.2px;}
+@media (max-width:380px){ .rb-navi{font-size:9.5px;} }
 .rb-navi.on{color:var(--bg-0);background:linear-gradient(140deg,var(--aqua),var(--teal));box-shadow:0 0 22px -4px var(--aqua);}
 .rb-fab{position:fixed;bottom:calc(84px + env(safe-area-inset-bottom,0px));right:max(16px,calc(50% - 224px));width:56px;height:56px;border-radius:18px;z-index:41;
   background:linear-gradient(140deg,var(--coral),var(--violet));border:none;color:#fff;display:grid;place-items:center;cursor:pointer;
@@ -2001,7 +2003,7 @@ function TidepoolReef() {
 
       {/* bottom nav */}
       <nav className="rb-nav">
-        {[["tank", Waves, "Tank"], ["log", FlaskConical, "Log"], ["deepdive", Bot, "DeepDive"], ["community", Newspaper, "Community"], ["profile", User, "Profile"]]
+        {[["tank", Waves, "Tanks"], ["community", Newspaper, "My Feed"], ["deepdive", Bot, "DeepDive"], ["reefid", Camera, "Reef ID"], ["log", FlaskConical, "Testing Logs"]]
           .map(([k, Icon, lbl]) => (
             <div key={k} className={"rb-navi" + (view === k ? " on" : "")} onClick={() => go(k)}>
               <div style={{ position: "relative" }}><Icon size={20} />{k === "tank" && taskCount > 0 && <span className="rb-navbadge">{taskCount}</span>}</div>
