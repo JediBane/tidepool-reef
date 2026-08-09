@@ -1,0 +1,10 @@
+# Tidepool Reef
+User-agent: *
+Allow: /
+
+# Signed-in app views carry no public content and shouldn't be indexed
+Disallow: /?view=
+Disallow: /?tank=
+Disallow: /?reset=
+
+Sitemap: https://tidepoolreef.com/sitemap.xml
