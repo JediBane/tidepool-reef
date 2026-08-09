@@ -1365,6 +1365,19 @@ function TidepoolReef() {
   const [libItem, setLibItem] = useState(null);
   const [addItem, setAddItem] = useState(null);
   const [publicTank, setPublicTank] = useState(null);
+  // Stamp the referral source on the profile the first time we see a signed-in session.
+  useEffect(() => {
+    if (!state || !state.profile) return;
+    try {
+      const ref = localStorage.getItem("tr:ref");
+      if (ref && !state.profile.signup_source) {
+        supabase.from("profiles").update({ signup_source: ref }).eq("id", state.uid).then(() => {
+          try { localStorage.removeItem("tr:ref"); } catch (e) {}
+        });
+      }
+    } catch (e) {}
+  }, [state && state.uid, state && state.profile && state.profile.signup_source]);
+
   // Activity ping (throttled to hourly) + app settings (announcement, AI kill switch)
   const [appSettings, setAppSettings] = useState({});
   useEffect(() => {
@@ -1382,6 +1395,13 @@ function TidepoolReef() {
       setAppSettings(s);
     });
   }, [state && state.uid]);
+  // Referral capture: /?ref=r2r stores which forum/post sent them, stamped at signup.
+  useEffect(() => {
+    try {
+      const ref = new URLSearchParams(window.location.search).get("ref");
+      if (ref) localStorage.setItem("tr:ref", ref.slice(0, 40));
+    } catch (e) {}
+  }, []);
   // Shareable tank links: /?tank=<id> opens that public tank once signed in.
   useEffect(() => {
     try {
@@ -2599,6 +2619,28 @@ function AdminUsers({ state }) {
 }
 
 /* ---------------- Admin CRM ---------------- */
+function SignupSources() {
+  const [rows, setRows] = useState(null);
+  useEffect(() => { supabase.rpc("admin_signup_sources").then(({ data, error }) => { if (!error) setRows(data || []); }); }, []);
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div className="rb-h2" style={{ marginTop: 0 }}>📈 Where signups come from</div>
+      <div className="rb-card">
+        {rows.map((r) => (
+          <div key={r.source} className="rb-li">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="nm">{r.source}</div>
+              <div className="sub">{r.with_tank} set up a tank · {r.active_7d} active this week</div>
+            </div>
+            <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 20, color: "var(--aqua)", flex: "none" }}>{r.signups}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AdminOverview() {
   const [stats, setStats] = useState(null);
   const [err, setErr] = useState("");
@@ -2651,6 +2693,7 @@ function AdminOverview() {
       {chart("readings", "var(--teal)", "Parameter readings logged")}
       {chart("posts", "var(--violet)", "Community posts")}
       {chart("aithreads", "#8f5cd6", "AI conversations started")}
+      <SignupSources />
       <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", margin: "16px 0 4px" }}>
         Build v{APP_VERSION} · {APP_VERSION.startsWith("0.") ? "pre-launch — 1.0 ships at public launch" : "production"}
       </div>
