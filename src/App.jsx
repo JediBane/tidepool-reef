@@ -2176,6 +2176,8 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank,
   const tankPhotoRef = useRef(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [tune, setTune] = useState(null);
+  const [issuesOpen, setIssuesOpen] = useState(() => { try { return localStorage.getItem("tr:issues") !== "0"; } catch (e) { return true; } });
+  const toggleIssues = () => setIssuesOpen((v) => { const n = !v; try { localStorage.setItem("tr:issues", n ? "1" : "0"); } catch (e) {} return n; });
   const [equipOpen, setEquipOpen] = useState(false);
   const t = state.tank;
   // Health from each parameter's LAST KNOWN value, weighted by real reef impact
@@ -2293,7 +2295,17 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank,
       )}
 
       {issues.length > 0 && (<>
-        <div className="rb-h2"><Bell size={16} color="var(--coral)" /> Needs attention <small>{issues.length} flag{issues.length > 1 ? "s" : ""}</small></div>
+        <div className="rb-h2" style={{ cursor: "pointer", userSelect: "none" }} onClick={toggleIssues}>
+          <Bell size={16} color="var(--coral)" /> Needs attention
+          <small style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {issues.length} flag{issues.length > 1 ? "s" : ""}
+            <span aria-hidden style={{ display: "grid", placeItems: "center", width: 20, height: 20, borderRadius: 6,
+              border: "1px solid var(--brd-2)", color: "var(--aqua)", fontSize: 14, fontWeight: 700, lineHeight: 1 }}>
+              {issuesOpen ? "−" : "+"}
+            </span>
+          </small>
+        </div>
+        {issuesOpen && (
         <div className="rb-card">
           {issues.map((p) => {
             const st = p._drift ? "warn" : statusOf(p, (lastVal(state.history, p.key) || {}).v);
@@ -2306,6 +2318,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank,
             );
           })}
         </div>
+        )}
       </>)}
 
       {(() => {
