@@ -434,7 +434,7 @@ function rel(ts) {
   return Math.floor(s / 86400) + "d";
 }
 
-function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "", isPublic: t.is_public !== false, shareParams: !!t.share_params }; }
+function shapeTank(t) { return { id: t.id, name: t.name, model: t.model || "", volume: t.volume_gal || 0, since: t.since || "", isPublic: t.is_public !== false, shareParams: !!t.share_params, photo: t.photo_url || null }; }
 
 async function fetchSpeciesCounts() {
   const { data } = await supabase.rpc("species_counts");
@@ -1863,6 +1863,18 @@ function TidepoolReef() {
     }
     return true;
   };
+  const setTankPhoto = async (id, file) => {
+    const url = await uploadPhoto(file, state.uid);
+    if (!url) { alert("Couldn't upload that photo — try again."); return; }
+    const { error } = await supabase.from("tanks").update({ photo_url: url }).eq("id", id);
+    if (error) { console.error("setTankPhoto:", error.message); alert("Couldn't save the photo — try again."); return; }
+    setState((s) => ({ ...s, tanks: s.tanks.map((t) => t.id === id ? { ...t, photo: url } : t), tank: s.tank && s.tank.id === id ? { ...s.tank, photo: url } : s.tank }));
+  };
+  const clearTankPhoto = async (id) => {
+    const { error } = await supabase.from("tanks").update({ photo_url: null }).eq("id", id);
+    if (error) { alert("Couldn't remove the photo — try again."); return; }
+    setState((s) => ({ ...s, tanks: s.tanks.map((t) => t.id === id ? { ...t, photo: null } : t), tank: s.tank && s.tank.id === id ? { ...s.tank, photo: null } : s.tank }));
+  };
   const setTankSharing = async (id, field, value) => {
     const col = field === "params" ? "share_params" : "is_public";
     setState((s) => ({
@@ -1980,7 +1992,7 @@ function TidepoolReef() {
         })()}
 
         {/* views */}
-        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment }} />}
+        {view === "tank" && <TankHome {...{ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment, setTankPhoto, clearTankPhoto }} />}
         {view === "log" && <LogView {...{ state, latest, sel, setSel, addLivestock, endLivestock, addLogEntry, switchTank, go, uid: state.uid, profile: state.profile }} />}
         {view === "deepdive" && <DeepDive {...{ state, latest, issues, switchTank }} uid={session.user.id} onUpgrade={() => setUpgradeOpen(true)} />}
         {view === "community" && <Feed {...{ allPosts, liked: state.liked, toggleLike, addPost, addComment, uid: state.uid, following: state.following || {}, toggleFollow }} />}
@@ -2160,7 +2172,10 @@ function EquipmentSheet({ equipment, onClose, onAdd, onDelete }) {
   );
 }
 
-function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment }) {
+function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank, addEquipment, deleteEquipment, setTankPhoto, clearTankPhoto }) {
+  const tankPhotoRef = useRef(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [tune, setTune] = useState(null);
   const [equipOpen, setEquipOpen] = useState(false);
   const t = state.tank;
   // Health from each parameter's LAST KNOWN value, weighted by real reef impact
@@ -2186,16 +2201,41 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank,
     <div className="rb-fadein">
       <TankSwitcher tanks={state.tanks} tankId={state.tankId} switchTank={switchTank} createTank={createTank} />
       <div className="rb-tankhero" style={{ marginTop: 4, height: 190 }}>
-        <div className="light" /><div className="rock" />
-        <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
-        <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
-        <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
-        <div style={{ position: "absolute", left: 16, bottom: 14 }}>
-          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24, letterSpacing: "-.5px" }}>{t.name}</div>
-          <div style={{ color: "var(--muted)", fontSize: 12.5 }}>{t.model} · {t.volume} gal · est. {t.since}</div>
+        {t.photo ? (<>
+          <img src={t.photo} alt={t.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+          {/* Scrim: keeps the name and health score legible over any photo */}
+          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(3,10,16,.88) 0%, rgba(3,10,16,.55) 34%, rgba(3,10,16,.12) 68%, rgba(3,10,16,.30) 100%)" }} />
+        </>) : (<>
+          <div className="light" /><div className="rock" />
+          <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 16, height: 22, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
+          <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 20, height: 14, background: "#3ce0a3" }} />
+          <div className="rb-coralbit" style={{ bottom: "36%", left: "46%", width: 12, height: 18, background: "#ffc24d", borderRadius: 6 }} />
+        </>)}
+
+        {/* Add / change tank photo */}
+        <input ref={tankPhotoRef} type="file" accept="image/*" style={{ display: "none" }}
+          onChange={(e) => {
+            const f = e.target.files && e.target.files[0];
+            if (f) { setPhotoBusy(true); reefPick(f, setTune, async (p) => { await setTankPhoto(t.id, p.file); setPhotoBusy(false); }); }
+            e.target.value = "";
+          }} />
+        <div style={{ position: "absolute", top: 12, right: 12, display: "flex", gap: 6 }}>
+          {t.photo && (
+            <div className="rb-chip" style={{ fontSize: 11, padding: "5px 9px", background: "rgba(3,10,16,.6)", backdropFilter: "blur(6px)" }}
+              onClick={() => { if (confirm("Remove this tank photo?")) clearTankPhoto(t.id); }}>Remove</div>
+          )}
+          <div className="rb-chip" style={{ fontSize: 11, padding: "5px 9px", background: "rgba(3,10,16,.6)", backdropFilter: "blur(6px)", opacity: photoBusy ? .6 : 1 }}
+            onClick={() => !photoBusy && tankPhotoRef.current && tankPhotoRef.current.click()}>
+            <Camera size={12} style={{ verticalAlign: -2, marginRight: 4 }} />{photoBusy ? "Uploading…" : t.photo ? "Change" : "Add photo"}
+          </div>
         </div>
-        <div style={{ position: "absolute", right: 16, bottom: 14, textAlign: "right" }}>
-          <div style={{ fontSize: 9.5, color: "var(--muted)", letterSpacing: 1.2, marginBottom: 1 }}>HEALTH</div>
+
+        <div style={{ position: "absolute", left: 16, bottom: 14, textShadow: t.photo ? "0 2px 12px rgba(0,0,0,.9)" : "none" }}>
+          <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 24, letterSpacing: "-.5px" }}>{t.name}</div>
+          <div style={{ color: t.photo ? "rgba(255,255,255,.82)" : "var(--muted)", fontSize: 12.5 }}>{t.model} · {t.volume} gal · est. {t.since}</div>
+        </div>
+        <div style={{ position: "absolute", right: 16, bottom: 14, textAlign: "right", textShadow: t.photo ? "0 2px 12px rgba(0,0,0,.9)" : "none" }}>
+          <div style={{ fontSize: 9.5, color: t.photo ? "rgba(255,255,255,.75)" : "var(--muted)", letterSpacing: 1.2, marginBottom: 1 }}>HEALTH</div>
           <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 34, lineHeight: 1,
             ...(healthBand
               ? { color: healthBand.color }
@@ -2314,6 +2354,7 @@ function TankHome({ state, latest, issues, go, setSheet, switchTank, createTank,
         )}
       </div>
       {equipOpen && <EquipmentSheet equipment={state.equipment || []} onClose={() => setEquipOpen(false)} onAdd={addEquipment} onDelete={deleteEquipment} />}
+      {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => { setTune(null); setPhotoBusy(false); }} />}
 
       <div className="rb-cols2">
         <div>
@@ -4514,12 +4555,17 @@ function PublicTankSheet({ tankId, onClose, onMessage }) {
           <>
             <div className="rb-split-media">
             <div className="rb-tankhero" style={{ height: 150, marginTop: 0 }}>
-              <div className="light" /><div className="rock" />
-              <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 14, height: 20, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
-              <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 18, height: 12, background: "#3ce0a3" }} />
-              <div style={{ position: "absolute", left: 14, bottom: 12 }}>
+              {t.photo_url ? (<>
+                <img src={t.photo_url} alt={t.name} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(3,10,16,.88) 0%, rgba(3,10,16,.5) 38%, rgba(3,10,16,.1) 75%)" }} />
+              </>) : (<>
+                <div className="light" /><div className="rock" />
+                <div className="rb-coralbit" style={{ bottom: "38%", left: "30%", width: 14, height: 20, background: "#ff7a5c", borderRadius: "50% 50% 4px 4px" }} />
+                <div className="rb-coralbit" style={{ bottom: "40%", left: "58%", width: 18, height: 12, background: "#3ce0a3" }} />
+              </>)}
+              <div style={{ position: "absolute", left: 14, bottom: 12, textShadow: t.photo_url ? "0 2px 12px rgba(0,0,0,.9)" : "none" }}>
                 <div style={{ fontFamily: "Bricolage Grotesque", fontWeight: 800, fontSize: 19 }}>{t.name}</div>
-                <div style={{ color: "var(--muted)", fontSize: 12 }}>{t.model} · {t.volume_gal} gal · since {t.since}</div>
+                <div style={{ color: t.photo_url ? "rgba(255,255,255,.82)" : "var(--muted)", fontSize: 12 }}>{t.model} · {t.volume_gal} gal · since {t.since}</div>
               </div>
             </div>
             <div className="rb-li" style={{ padding: "14px 0" }}>
