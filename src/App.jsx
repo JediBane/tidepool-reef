@@ -978,7 +978,7 @@ function AuthScreen() {
         if (!agreed) { setMsg("Please agree to the Terms of Service and Privacy Policy to create an account."); setBusy(false); return; }
         const redirectBase = (typeof window !== "undefined" && window.location && window.location.origin && !window.location.origin.includes("localhost"))
           ? window.location.origin
-          : "https://reefpulse-app.netlify.app";
+          : "https://tidepoolreef.com";
         const { data, error } = await supabase.auth.signUp({
           email: email.trim(), password: pw,
           options: { data: { handle: clean }, emailRedirectTo: redirectBase },
@@ -1008,7 +1008,7 @@ function AuthScreen() {
     if (!email.trim()) { setMsg("Enter your email above first, then tap reset."); return; }
     setBusy(true); setMsg("");
     const redirectBase = (typeof window !== "undefined" && window.location && window.location.origin && !window.location.origin.includes("localhost"))
-      ? window.location.origin : "https://reefpulse-app.netlify.app";
+      ? window.location.origin : "https://tidepoolreef.com";
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: redirectBase + "?reset=1" });
     setBusy(false);
     setMsg(error ? error.message : "If that email has an account, a password reset link is on its way.");

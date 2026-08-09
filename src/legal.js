@@ -32,7 +32,7 @@ Only post content you have the right to share. Don't post content that is illega
 
 ["9. Changes", `We may update these Terms. If changes are material, we'll ask you to review and accept the new version in the App. Continued use after acceptance means the new Terms apply.`],
 
-["10. Governing law and contact", `These Terms are governed by the laws of the State of Florida, USA, without regard to conflict-of-law rules. Questions: support@tidepoolreef.app.`],
+["10. Governing law and contact", `These Terms are governed by the laws of the State of Florida, USA, without regard to conflict-of-law rules. Questions: support@tidepoolreef.com.`],
 ];
 
 export const PRIVACY = [
@@ -62,5 +62,5 @@ This policy explains what we collect, why, and your choices. Short version: we c
 
 ["7. Children", `The App is not directed to children under 13, and we don't knowingly collect their data. If you believe a child under 13 has an account, contact us and we'll delete it.`],
 
-["8. Changes and contact", `If we materially change this policy, we'll ask you to review and accept the new version in the App. Questions or requests: support@tidepoolreef.app.`],
+["8. Changes and contact", `If we materially change this policy, we'll ask you to review and accept the new version in the App. Questions or requests: support@tidepoolreef.com.`],
 ];

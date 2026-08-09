@@ -27,7 +27,7 @@ export default async (req) => {
   const price = plan === "annual" ? process.env.STRIPE_PRICE_ANNUAL : process.env.STRIPE_PRICE_MONTHLY;
   if (!price || !uid) return Response.json({ error: "Missing price or user" }, { status: 400 });
 
-  const app = process.env.APP_URL || "https://reefpulse-app.netlify.app";
+  const app = process.env.APP_URL || "https://tidepoolreef.com";
   const form = new URLSearchParams({
     mode: "subscription",
     "line_items[0][price]": price,
