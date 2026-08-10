@@ -72,7 +72,10 @@ html,body{height:100%;overflow:hidden;overscroll-behavior:none;}
   background:rgba(176,108,255,.14);border:1px solid rgba(176,108,255,.4);color:#d7b6ff;padding:7px 12px;border-radius:20px;}
 .rb-pearl{width:11px;height:11px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff,#b06cff 70%);box-shadow:0 0 7px #b06cff;}
 
-.rb-card{background:var(--glass);border:1px solid var(--brd);border-radius:20px;backdrop-filter:blur(14px);
+/* NOTE: no backdrop-filter here. It creates a containing block for position:fixed
+   descendants, which traps any sheet/overlay rendered inside a card (clipped to the
+   card's box on iPad). Same class of bug as the retired rbUp transform. */
+.rb-card{background:var(--glass);border:1px solid var(--brd);border-radius:20px;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 14px 40px -24px rgba(0,0,0,.8);}
 .rb-h2{font-family:'Bricolage Grotesque';font-weight:700;font-size:16px;letter-spacing:-.3px;margin:24px 2px 12px;
   display:flex;align-items:center;gap:8px;}
@@ -798,7 +801,7 @@ function ReefPhotoTuner({ file, onUse, onCancel }) {
     REEF_FILTER.set(strength);
     onUse({ ...p, file: dataUrlToFile(p.url, file.name) });
   };
-  return (
+  return createPortal((
     <div className="rb-overlay" onClick={onCancel} style={{ zIndex: 260 }}>
       <div className="rb-sheet" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
         <div className="rb-sheet-h"><b>Reef light filter</b><div className="rb-iconbtn" onClick={onCancel}><X size={18} /></div></div>
@@ -830,7 +833,7 @@ function ReefPhotoTuner({ file, onUse, onCancel }) {
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
 
 /* Measure the actinic cast first: heavy blue → offer the filter, otherwise pass straight through. */
