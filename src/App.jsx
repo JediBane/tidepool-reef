@@ -1384,6 +1384,15 @@ function TidepoolReef() {
     } catch (e) {}
   }, [state && state.uid, state && state.profile && state.profile.signup_source]);
 
+  // A newer build is live (service worker took control) — offer a refresh rather than
+  // silently leaving the user on stale code that's missing features.
+  const [updateReady, setUpdateReady] = useState(false);
+  useEffect(() => {
+    const h = () => setUpdateReady(true);
+    window.addEventListener("tr:update-ready", h);
+    return () => window.removeEventListener("tr:update-ready", h);
+  }, []);
+
   // Activity ping (throttled to hourly) + app settings (announcement, AI kill switch)
   const [appSettings, setAppSettings] = useState({});
   useEffect(() => {
@@ -2024,6 +2033,18 @@ function TidepoolReef() {
       {(view === "shop" || view === "seller") && <button className="rb-fab" onClick={() => setSheet("sell")}><Tag size={22} /></button>}
 
       {/* bottom nav */}
+      {updateReady && (
+        <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)",
+          bottom: "calc(88px + env(safe-area-inset-bottom, 0px))", zIndex: 300,
+          background: "var(--bg-2)", border: "1px solid var(--aqua)", borderRadius: 14,
+          padding: "10px 14px", display: "flex", alignItems: "center", gap: 12,
+          boxShadow: "0 10px 34px -8px rgba(0,0,0,.6)", maxWidth: "92%" }}>
+          <div style={{ fontSize: 13 }}>A new version of Tidepool Reef is ready.</div>
+          <button className="rb-btn" style={{ padding: "7px 14px", fontSize: 12.5, flex: "none" }}
+            onClick={() => window.location.reload()}>Refresh</button>
+        </div>
+      )}
+
       <nav className="rb-nav">
         {[["tank", Waves, "Tanks"], ["community", Newspaper, "My Feed"], ["deepdive", Bot, "DeepDive"], ["reefid", Camera, "Reef ID"], ["log", FlaskConical, "Testing Logs"]]
           .map(([k, Icon, lbl]) => (
