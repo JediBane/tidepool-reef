@@ -645,6 +645,7 @@ function stripMd(s) {
     .trim();
 }
 const APP_VERSION = (typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev").replace(/\.0$/, "");
+const BUILD_ID = (typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev");
 function LegalSheet({ doc, onClose }) {
   const sections = doc === "privacy" ? PRIVACY : TERMS;
   return (
@@ -2752,7 +2753,7 @@ function AdminOverview() {
       {chart("aithreads", "#8f5cd6", "AI conversations started")}
       <SignupSources />
       <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", margin: "16px 0 4px" }}>
-        Build v{APP_VERSION} · {APP_VERSION.startsWith("0.") ? "pre-launch — 1.0 ships at public launch" : "production"}
+        Build v{APP_VERSION} · {BUILD_ID} · {APP_VERSION.startsWith("0.") ? "pre-launch" : "production"}
       </div>
     </div>
   );
@@ -6554,7 +6555,7 @@ function SettingsView({ state, setTankSharing, createTank, renameTank, deleteTan
         <button className="rb-btn" style={{ width: "100%", marginTop: 12, padding: 12, background: "rgba(255,93,114,.15)", color: "#ff8fa0", border: "1px solid rgba(255,93,114,.4)" }}
           onClick={() => setDeleteOpen(true)}>Delete account</button>
       <div style={{ textAlign: "center", fontSize: 11.5, color: "var(--muted-2)", marginTop: 16 }}>
-        Tidepool Reef v{APP_VERSION}{APP_VERSION.startsWith("0.") ? " · pre-launch" : ""}
+        Tidepool Reef v{APP_VERSION} · build {BUILD_ID}
         <span style={{ margin: "0 7px", opacity: .4 }}>·</span>
         <span style={{ color: "var(--aqua)", cursor: "pointer" }} onClick={() => setLegalDoc("terms")}>Terms</span>
         <span style={{ margin: "0 7px", opacity: .4 }}>·</span>
