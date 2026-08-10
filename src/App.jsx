@@ -1760,8 +1760,13 @@ function TidepoolReef() {
     setState((s) => ({ ...s, speciesCounts: counts }));
     award(2);
   };
-  const sendMessage = async (toId, body, speciesId) => {
-    await supabase.from("messages").insert({ sender_id: state.uid, recipient_id: toId, body, species_id: speciesId || null });
+  const sendMessage = async (toId, body, speciesId, photoUrl) => {
+    const { error } = await supabase.from("messages").insert({
+      sender_id: state.uid, recipient_id: toId,
+      body: body || null, species_id: speciesId || null, photo_url: photoUrl || null,
+    });
+    if (error) { console.error("sendMessage:", error.message); alert("Couldn't send that message — try again."); return false; }
+    return true;
   };
   const addListing = async (l) => {
     const loc = state.profile.location || "Florida, United States";
@@ -6282,14 +6287,32 @@ function Messages({ state, sendMessage }) {
   const [threads, setThreads] = useState(null);
   const [open, setOpen] = useState(null);
   const [reply, setReply] = useState("");
+  const [photo, setPhoto] = useState(null);      // {url, file} staged attachment
+  const [tune, setTune] = useState(null);
+  const [sending, setSending] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
+  const msgPhotoRef = useRef(null);
   const load = () => fetchThreads(state.uid).then(setThreads);
   useEffect(() => { load(); }, [state.uid]);
 
+  const removeMessage = async (m) => {
+    if (!confirm("Delete this message? The other reefer will see it was removed.")) return;
+    const { error } = await supabase.rpc("delete_message", { mid: m.id });
+    if (error) { alert("Couldn't delete that message — try again."); return; }
+    const fresh = await fetchThreads(state.uid);
+    setThreads(fresh);
+    setOpen(fresh.find((t) => t.id === open.id) || open);
+  };
+
   const send = async () => {
-    if (!reply.trim() || !open) return;
+    if ((!reply.trim() && !photo) || !open || sending) return;
+    setSending(true);
     const body = reply.trim();
-    setReply("");
-    await sendMessage(open.id, body, null);
+    let photoUrl = null;
+    if (photo) photoUrl = await uploadPhoto(photo.file, state.uid);
+    setReply(""); setPhoto(null);
+    await sendMessage(open.id, body, null, photoUrl);
+    setSending(false);
     const fresh = await fetchThreads(state.uid);
     setThreads(fresh);
     setOpen(fresh.find((t) => t.id === open.id) || open);
@@ -6306,16 +6329,55 @@ function Messages({ state, sendMessage }) {
           <div className="nm">@{open.handle}</div>
         </div>
         <div className="rb-ai-msgs">
-          {open.msgs.map((m) => (
-            <div key={m.id} className={"rb-ai-msg " + (m.sender_id === state.uid ? "u" : "a")}>{m.body}</div>
-          ))}
+          {open.msgs.map((m) => {
+            const mine = m.sender_id === state.uid;
+            if (m.deleted_at) return (
+              <div key={m.id} className={"rb-ai-msg " + (mine ? "u" : "a")} style={{ opacity: .5, fontStyle: "italic" }}>
+                Message deleted
+              </div>
+            );
+            return (
+              <div key={m.id} className={"rb-ai-msg " + (mine ? "u" : "a")} style={{ position: "relative" }}>
+                {m.photo_url && (
+                  <img src={m.photo_url} alt="" onClick={() => setLightbox(m.photo_url)}
+                    style={{ display: "block", width: "100%", maxWidth: 240, borderRadius: 12, marginBottom: m.body ? 8 : 0, cursor: "pointer" }} />
+                )}
+                {m.body}
+                {mine && (
+                  <span onClick={() => removeMessage(m)} title="Delete message"
+                    style={{ position: "absolute", top: -8, right: -6, width: 22, height: 22, borderRadius: "50%",
+                      display: "grid", placeItems: "center", background: "var(--bg-2)", border: "1px solid var(--brd-2)",
+                      color: "var(--muted)", cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</span>
+                )}
+              </div>
+            );
+          })}
         </div>
+
+        {photo && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, padding: "8px 10px", background: "var(--bg-2)", borderRadius: 12, border: "1px solid var(--brd)" }}>
+            <img src={photo.url} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover" }} />
+            <div style={{ flex: 1, fontSize: 12.5, color: "var(--muted)" }}>Photo attached</div>
+            <span style={{ cursor: "pointer", color: "var(--muted-2)", padding: 4 }} onClick={() => setPhoto(null)}>✕</span>
+          </div>
+        )}
+
         <div className="rb-ai-row">
-          <input className="rb-input" placeholder="Reply…" value={reply}
+          <input ref={msgPhotoRef} type="file" accept="image/*" style={{ display: "none" }}
+            onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) reefPick(f, setTune, (p) => setPhoto({ url: p.url, file: p.file })); e.target.value = ""; }} />
+          <button className="rb-btn ghost" style={{ padding: "0 12px", flex: "none" }} title="Send a photo"
+            onClick={() => msgPhotoRef.current && msgPhotoRef.current.click()}><Camera size={16} /></button>
+          <input className="rb-input" placeholder={photo ? "Add a note (optional)…" : "Reply…"} value={reply}
             onChange={(e) => setReply(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") send(); }} />
-          <button className="rb-btn" disabled={!reply.trim()} onClick={send}><Send size={16} /></button>
+          <button className="rb-btn" disabled={(!reply.trim() && !photo) || sending} onClick={send}><Send size={16} /></button>
         </div>
+        {tune && <ReefPhotoTuner file={tune.file} onUse={(p) => { tune.done(p); setTune(null); }} onCancel={() => setTune(null)} />}
+        {lightbox && createPortal((
+          <div className="rb-overlay" style={{ zIndex: 300, alignItems: "center" }} onClick={() => setLightbox(null)}>
+            <img src={lightbox} alt="" style={{ maxWidth: "94vw", maxHeight: "88vh", borderRadius: 14, objectFit: "contain" }} />
+          </div>
+        ), document.body)}
       </div>
     );
   }
