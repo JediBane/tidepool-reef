@@ -1504,12 +1504,13 @@ function TidepoolReef() {
   AI_GATE.check = async (kind) => {
     const p = state && state.profile;
     if (!p) return false;
-    if (p.plan === "pro") return true;
     const k = kind === "reefid" ? "reefid" : "deepdive";
     const field = k === "reefid" ? "reefid_used" : "deepdive_used";
     const used = p[field] || 0;
     const limit = k === "reefid" ? FREE_REEFID : FREE_DEEPDIVE;
-    if (used >= limit) { setUpgradeOpen(true); return false; }
+    // Gating applies to free plans only — but EVERY use is counted, including Pro,
+    // so usage stats and cost tracking reflect reality instead of free-tier only.
+    if (p.plan !== "pro" && used >= limit) { setUpgradeOpen(true); return false; }
     // Count this use client-side unless the server gate is the active counter.
     if (!AI_GATE_STATE.serverCounts) {
       try {
